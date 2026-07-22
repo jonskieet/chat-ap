@@ -25,6 +25,8 @@ export default function Profile() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editDisplayName, setEditDisplayName] = useState('')
   const [editBio, setEditBio] = useState('')
+  const [editInterests, setEditInterests] = useState<string[]>([])
+  const [interestDraft, setInterestDraft] = useState('')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -75,6 +77,8 @@ export default function Profile() {
     if (!profile) return
     setEditDisplayName(profile.display_name ?? '')
     setEditBio(profile.bio ?? '')
+    setEditInterests(profile.interests ?? [])
+    setInterestDraft('')
     setAvatarFile(null)
     setAvatarPreview(profile.avatar_url ?? null)
     setSaveError(null)
@@ -107,6 +111,7 @@ export default function Profile() {
         .update({
           display_name: editDisplayName.trim() || null,
           bio: editBio.trim() || null,
+          interests: editInterests,
           avatar_url,
         })
         .eq('id', user.id)
@@ -120,6 +125,22 @@ export default function Profile() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function addInterest() {
+    const value = interestDraft.trim().replace(/^#/, '')
+    if (!value) return
+    if (editInterests.some((t) => t.toLowerCase() === value.toLowerCase())) {
+      setInterestDraft('')
+      return
+    }
+    if (editInterests.length >= 8) return
+    setEditInterests((prev) => [...prev, value])
+    setInterestDraft('')
+  }
+
+  function removeInterest(value: string) {
+    setEditInterests((prev) => prev.filter((t) => t !== value))
   }
 
   async function handleSignOut() {
@@ -173,7 +194,7 @@ export default function Profile() {
     }
   }
 
-  const tags = ['Minimalism', 'DesignThinking', 'Photography']
+  const tags = profile?.interests && profile.interests.length > 0 ? profile.interests : []
 
   return (
     <PhoneShell>
@@ -396,6 +417,52 @@ export default function Profile() {
               className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm outline-none focus-ring resize-none mb-1"
             />
             <p className="text-[11px] text-[var(--text-dim)] text-right mb-4">{editBio.length}/280</p>
+
+            <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">
+              Chủ đề quan tâm <span className="font-normal">(tối đa 8, dùng để gợi ý cộng đồng phù hợp)</span>
+            </label>
+            {editInterests.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {editInterests.map((t) => (
+                  <span
+                    key={t}
+                    className="flex items-center gap-1 text-xs bg-[var(--surface-2)] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1"
+                  >
+                    #{t}
+                    <button
+                      onClick={() => removeInterest(t)}
+                      className="p-0.5 rounded-full hover:bg-[var(--border)] focus-ring"
+                      aria-label={`Xóa ${t}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                value={interestDraft}
+                onChange={(e) => setInterestDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addInterest()
+                  }
+                }}
+                placeholder="vd: photography"
+                maxLength={24}
+                disabled={editInterests.length >= 8}
+                className="flex-1 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm outline-none focus-ring disabled:opacity-50"
+              />
+              <button
+                onClick={addInterest}
+                disabled={!interestDraft.trim() || editInterests.length >= 8}
+                className="shrink-0 text-xs font-semibold bg-[var(--surface-2)] border border-[var(--border)] rounded-full px-3 py-2.5 focus-ring disabled:opacity-50"
+              >
+                Thêm
+              </button>
+            </div>
 
             {saveError && <p className="text-xs text-red-400 mb-3">{saveError}</p>}
 

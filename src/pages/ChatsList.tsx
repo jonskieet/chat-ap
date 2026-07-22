@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
+import { Plus, Search, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
@@ -18,21 +18,24 @@ export default function ChatsList() {
   const [suggested, setSuggested] = useState<Profile[]>([])
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newTopic, setNewTopic] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
 
     const [chatsRes, communitiesRes] = await Promise.all([
       user ? supabase.rpc('get_my_chats') : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from('channels')
-        .select('*')
-        .eq('is_group', true)
-        .order('created_at', { ascending: false })
-        .limit(8),
+      // suggested_channels() ranks communities matching the user's profile
+      // interests first, then falls back to the most recently active ones.
+      supabase.rpc('suggested_channels', { p_limit: 8 }),
     ])
 
     if (chatsRes.error) console.error(chatsRes.error)
+    if (communitiesRes.error) console.error(communitiesRes.error)
     setChats((chatsRes.data as ChatSummary[]) ?? [])
     setCommunities(communitiesRes.data ?? [])
 
@@ -97,6 +100,30 @@ export default function ChatsList() {
       return
     }
     navigate(`/chats/${data}`)
+  }
+
+  async function handleCreateCommunity() {
+    if (!user) return navigate('/login')
+    if (!newName.trim() || creating) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const { data, error } = await supabase.rpc('create_channel', {
+        p_name: newName.trim(),
+        p_topic: newTopic.trim() || null,
+      })
+      if (error) throw error
+      setCreateOpen(false)
+      setNewName('')
+      setNewTopic('')
+      await load()
+      navigate(`/chats/${data}`)
+    } catch (e) {
+      console.error(e)
+      setCreateError('Không thể tạo cộng đồng. Vui lòng thử lại.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   async function handleJoinCommunity(channelId: string) {
@@ -246,11 +273,23 @@ export default function ChatsList() {
         </section>
 
         <section>
-          <h2 className="font-display font-bold text-lg mb-0.5">Communities</h2>
-          <p className="text-xs text-[var(--text-dim)] mb-3">Popular chat rooms</p>
+          <div className="flex items-center justify-between mb-0.5">
+            <h2 className="font-display font-bold text-lg">Communities</h2>
+            <button
+              onClick={() => (user ? setCreateOpen(true) : navigate('/login'))}
+              className="flex items-center gap-1 text-xs font-semibold bg-[var(--surface)] border border-[var(--border)] rounded-full px-3 py-1.5 focus-ring"
+            >
+              <Plus size={13} /> Tạo mới
+            </button>
+          </div>
+          <p className="text-xs text-[var(--text-dim)] mb-3">
+            {user ? 'Gợi ý theo chủ đề bạn quan tâm' : 'Popular chat rooms'}
+          </p>
           <div className="grid grid-cols-4 gap-3">
             {communities.length === 0 && !loading && (
-              <p className="text-xs text-[var(--text-dim)] col-span-4">Chưa có cộng đồng nào.</p>
+              <p className="text-xs text-[var(--text-dim)] col-span-4">
+                Chưa có cộng đồng nào phù hợp. Hãy tạo cộng đồng đầu tiên!
+              </p>
             )}
             {communities.map((c) => (
               <button
@@ -271,6 +310,61 @@ export default function ChatsList() {
           </div>
         </section>
       </div>
+
+      {createOpen && (
+        <div
+          className="absolute inset-0 z-30 bg-black/70 flex items-end"
+          onClick={() => !creating && setCreateOpen(false)}
+        >
+          <div
+            className="w-full bg-[var(--surface)] rounded-t-3xl p-5 border-t border-[var(--border)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display font-bold text-lg">Tạo cộng đồng mới</h2>
+              <button
+                onClick={() => setCreateOpen(false)}
+                className="p-1 focus-ring rounded-full"
+                aria-label="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">Tên cộng đồng</label>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="vd: photography"
+              maxLength={40}
+              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm outline-none focus-ring mb-4"
+            />
+
+            <label className="block text-xs font-semibold text-[var(--text-dim)] mb-1.5">
+              Chủ đề <span className="font-normal">(không bắt buộc)</span>
+            </label>
+            <textarea
+              value={newTopic}
+              onChange={(e) => setNewTopic(e.target.value)}
+              placeholder="Mô tả ngắn về chủ đề của cộng đồng..."
+              rows={3}
+              maxLength={140}
+              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm outline-none focus-ring resize-none mb-4"
+            />
+
+            {createError && <p className="text-xs text-red-400 mb-3">{createError}</p>}
+
+            <button
+              onClick={handleCreateCommunity}
+              disabled={creating || !newName.trim()}
+              className="w-full gradient-nova text-black font-bold rounded-full py-3.5 focus-ring disabled:opacity-50"
+            >
+              {creating ? 'Đang tạo...' : 'Tạo cộng đồng'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </PhoneShell>
   )

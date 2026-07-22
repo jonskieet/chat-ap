@@ -5,6 +5,7 @@ export interface Profile {
   avatar_url: string | null
   bio: string | null
   status: 'online' | 'offline'
+  interests: string[]
   created_at: string
 }
 
