@@ -14,9 +14,17 @@ export interface Channel {
   topic: string | null
   cover_url: string | null
   is_group: boolean
+  is_dm?: boolean
+  dm_key?: string | null
   created_by: string
   member_count?: number
   message_count?: number
+  created_at: string
+}
+
+export interface Follow {
+  follower_id: string
+  following_id: string
   created_at: string
 }
 
