@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg: #0a0a0c;
+  --surface: #16161a;
+  --surface-2: #1f1f24;
+  --border: #2a2a30;
+  --text: #f5f5f7;
+  --text-dim: #9b9ba3;
+  --accent-flame-1: #ff5a36;
+  --accent-flame-2: #c81e3a;
+  --accent-nova-1: #7c3aed;
+  --accent-nova-2: #f97316;
+  --online: #34d399;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .font-display {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.gradient-nova {
+  background: linear-gradient(135deg, var(--accent-nova-1), var(--accent-nova-2));
+}
+
+.gradient-flame {
+  background: linear-gradient(160deg, var(--accent-flame-1), var(--accent-flame-2));
+}
+
+.story-ring {
+  background: conic-gradient(from 180deg, var(--accent-flame-1), var(--accent-nova-1), var(--accent-nova-2), var(--accent-flame-1));
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--accent-nova-2);
+  outline-offset: 2px;
+}
