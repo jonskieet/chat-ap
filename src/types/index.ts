@@ -35,3 +35,24 @@ export interface FollowStats {
   following: number
   posts: number
 }
+
+export type ReactionEmotion = 'love' | 'fire' | 'haha' | 'wow' | 'sad'
+
+export interface Post {
+  id: string
+  author_id: string
+  channel_id: string | null
+  caption: string | null
+  media_url: string | null
+  created_at: string
+  author?: Profile
+  reaction_counts?: Partial<Record<ReactionEmotion, number>>
+  my_reaction?: ReactionEmotion | null
+}
+
+export interface PostReaction {
+  post_id: string
+  user_id: string
+  emotion: ReactionEmotion
+  created_at: string
+}

@@ -109,9 +109,66 @@ create policy "Users can follow as themselves"
 create policy "Users can unfollow as themselves"
   on follows for delete using (auth.uid() = follower_id);
 
--- 6. REALTIME ----------------------------------------------------------
--- Enables live INSERT events on messages for supabase.channel() subscribers
-alter publication supabase_realtime add table messages;
+-- 6. POSTS (Home feed) ------------------------------------------------
+create table if not exists posts (
+  id uuid default gen_random_uuid() primary key,
+  author_id uuid references profiles(id) on delete cascade,
+  channel_id uuid references channels(id),
+  caption text,
+  media_url text,
+  created_at timestamptz default now()
+);
+
+alter table posts enable row level security;
+
+create policy "Posts are viewable by everyone"
+  on posts for select using (true);
+
+create policy "Users can create posts as themselves"
+  on posts for insert with check (auth.uid() = author_id);
+
+create policy "Users can delete their own posts"
+  on posts for delete using (auth.uid() = author_id);
+
+-- 7. POST REACTIONS (multi-emotion, one per user per post) ------------
+create table if not exists post_reactions (
+  post_id uuid references posts(id) on delete cascade,
+  user_id uuid references profiles(id) on delete cascade,
+  emotion text not null check (emotion in ('love', 'fire', 'haha', 'wow', 'sad')),
+  created_at timestamptz default now(),
+  primary key (post_id, user_id)
+);
+
+alter table post_reactions enable row level security;
+
+create policy "Reactions are viewable by everyone"
+  on post_reactions for select using (true);
+
+create policy "Users can react as themselves"
+  on post_reactions for insert with check (auth.uid() = user_id);
+
+create policy "Users can change their own reaction"
+  on post_reactions for update using (auth.uid() = user_id);
+
+create policy "Users can remove their own reaction"
+  on post_reactions for delete using (auth.uid() = user_id);
+
+-- Realtime: live reaction counts + new posts without reload
+alter publication supabase_realtime add table posts;
+alter publication supabase_realtime add table post_reactions;
+
+-- 8. STORAGE BUCKET FOR POST MEDIA -------------------------------------
+insert into storage.buckets (id, name, public)
+values ('posts', 'posts', true)
+on conflict (id) do nothing;
+
+create policy "Post media is publicly accessible"
+  on storage.objects for select using (bucket_id = 'posts');
+
+create policy "Authenticated users can upload post media"
+  on storage.objects for insert with check (
+    bucket_id = 'posts' and auth.role() = 'authenticated'
+  );
 
 -- 7. STORAGE BUCKETS -----------------------------------------------------
 -- Run once (or create via Dashboard > Storage):
