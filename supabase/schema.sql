@@ -25,6 +25,35 @@ create policy "Users can insert their own profile"
 create policy "Users can update their own profile"
   on profiles for update using (auth.uid() = id);
 
+-- Auto-create a profiles row whenever a new auth.users row is created.
+-- This runs as SECURITY DEFINER (owner privileges), so it works even when
+-- the client has no active session yet (e.g. "Confirm email" is enabled
+-- and signUp() hasn't returned a session). The username is read from the
+-- auth metadata passed in signUp({ options: { data: { username } } }).
+-- If no username was supplied, fall back to a placeholder derived from
+-- the user id so the insert never fails NOT NULL/UNIQUE unexpectedly.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, username)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'username', 'user_' || substr(new.id::text, 1, 8))
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
 -- 2. CHANNELS (topic chats / groups, e.g. #art) -----------------
 create table if not exists channels (
   id uuid default gen_random_uuid() primary key,

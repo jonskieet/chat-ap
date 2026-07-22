@@ -47,22 +47,19 @@ export default function Login() {
           return
         }
 
-        const { data, error: signUpError } = await supabase.auth.signUp({ email, password })
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { username: username.trim() } },
+        })
         if (signUpError) throw signUpError
 
-        if (data.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert({ id: data.user.id, username: username.trim() })
-          if (profileError) {
-            if (isUsernameTaken(profileError)) {
-              setError('Tên người dùng đã tồn tại')
-              setLoading(false)
-              return
-            }
-            throw profileError
-          }
-        }
+        // The `profiles` row is created automatically by a database
+        // trigger (see supabase/schema.sql: on_auth_user_created), reading
+        // `username` from the auth metadata above. This works even when
+        // "Confirm email" is on and signUp() returns no active session,
+        // which a client-side insert here could not do (RLS would reject
+        // an unauthenticated insert).
 
         // If Supabase's "Confirm email" setting is enabled (the default),
         // signUp does NOT return an active session — the user must confirm
