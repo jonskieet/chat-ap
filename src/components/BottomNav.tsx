@@ -21,32 +21,35 @@ function HomeIcon({ size = 20 }: { size?: number }) {
 export default function BottomNav() {
   const navigate = useNavigate()
   return (
-    <div className="absolute bottom-0 left-0 right-0 px-6 pb-6 pt-3 bg-gradient-to-t from-[var(--bg)] via-[var(--bg)]/95 to-transparent">
-      <div className="flex items-center justify-between bg-[var(--surface)]/90 backdrop-blur border border-[var(--border)] rounded-full px-5 py-3">
+    <div className="absolute bottom-0 left-0 right-0 px-5 pb-6 pt-3 bg-gradient-to-t from-[var(--bg)] via-[var(--bg)]/95 to-transparent">
+      <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/chats')}
-          className="text-[var(--text)] focus-ring rounded-full p-1"
+          className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center focus-ring shadow-lg"
           aria-label="Trang chủ"
         >
           <HomeIcon size={20} />
         </button>
+
         <button
           onClick={() => navigate('/chats')}
-          className="flex items-center gap-1.5 text-[var(--text)] focus-ring rounded-full p-1"
+          className="flex items-center gap-2 h-14 px-5 rounded-full bg-white text-black focus-ring shadow-lg"
           aria-label="Chats"
         >
-          <MessageCircle size={20} />
-          <span className="text-sm font-medium">Chats</span>
+          <MessageCircle size={19} />
+          <span className="text-sm font-semibold">Chats</span>
         </button>
+
         <button
-          className="gradient-nova rounded-full p-2 text-white focus-ring"
+          className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center focus-ring shadow-lg"
           aria-label="Tạo mới"
         >
-          <Plus size={18} />
+          <Plus size={20} />
         </button>
+
         <button
           onClick={() => navigate('/profile/annblack')}
-          className="text-[var(--text-dim)] focus-ring rounded-full p-1"
+          className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center focus-ring shadow-lg"
           aria-label="Hồ sơ"
         >
           <User size={20} />
