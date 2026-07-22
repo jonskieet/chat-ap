@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import type { Channel, Message, MessageReaction, ReactionEmotion } from '../types'
+import type { Channel, Message, MessageReaction, Profile, ReactionEmotion } from '../types'
 
 const QUICK_REACTIONS: ReactionEmotion[] = ['love', 'fire', 'haha', 'wow', 'sad']
 const REACTION_EMOJI: Record<ReactionEmotion, string> = {
@@ -20,6 +20,7 @@ export default function ChannelDetail() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [channel, setChannel] = useState<Channel | null>(null)
+  const [otherUser, setOtherUser] = useState<Profile | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
   const [memberCount, setMemberCount] = useState<number | null>(null)
@@ -33,8 +34,25 @@ export default function ChannelDetail() {
     if (!channelId) return
 
     async function loadChannel() {
-      const { data } = await supabase.from('channels').select('*').eq('id', channelId).single()
+      const { data, error } = await supabase.from('channels').select('*').eq('id', channelId).single()
+      if (error) console.error(error)
       setChannel(data)
+
+      if (data?.is_dm) {
+        // Who am I chatting with? channel_members holds both sides of the DM;
+        // filter out myself and join profiles for their live avatar/name/status.
+        const { data: members, error: memberErr } = await supabase
+          .from('channel_members')
+          .select('user_id, profile:profiles(*)')
+          .eq('channel_id', channelId)
+          .neq('user_id', profile?.id ?? '00000000-0000-0000-0000-000000000000')
+          .limit(1)
+          .maybeSingle()
+        if (memberErr) console.error(memberErr)
+        setOtherUser((members?.profile as unknown as Profile) ?? null)
+      } else {
+        setOtherUser(null)
+      }
     }
 
     async function loadMemberCount() {
@@ -166,8 +184,21 @@ export default function ChannelDetail() {
             <ArrowLeft size={18} />
           </button>
           <div className="flex items-center gap-2 bg-black/40 rounded-full pl-1 pr-3 py-1">
-            <div className="w-7 h-7 rounded-full bg-[var(--surface)]" />
-            <span className="text-sm font-medium">{profile?.display_name ?? 'Bạn'}</span>
+            <div className="relative w-7 h-7 rounded-full bg-[var(--surface)] overflow-hidden shrink-0">
+              {(channel?.is_dm ? otherUser?.avatar_url : channel?.cover_url) && (
+                <img
+                  src={channel?.is_dm ? otherUser?.avatar_url ?? '' : channel?.cover_url ?? ''}
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
+              )}
+              {channel?.is_dm && otherUser?.status === 'online' && (
+                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-500 border border-black" />
+              )}
+            </div>
+            <span className="text-sm font-medium">
+              {channel?.is_dm ? otherUser?.display_name ?? otherUser?.username ?? 'Đang tải...' : profile?.display_name ?? 'Bạn'}
+            </span>
           </div>
         </div>
         <div className="relative px-5 mt-4 flex items-center gap-3 text-xs">
@@ -194,7 +225,15 @@ export default function ChannelDetail() {
           }, {})
           return (
             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'} items-end gap-2`}>
-              {!mine && <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0" />}
+              {!mine && (
+                <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0 overflow-hidden flex items-center justify-center text-[11px] font-semibold">
+                  {m.sender?.avatar_url ? (
+                    <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    (m.sender?.display_name ?? m.sender?.username ?? '?').slice(0, 1).toUpperCase()
+                  )}
+                </div>
+              )}
               <div className="max-w-[75%]">
                 {!mine && (
                   <p className="text-[11px] text-[var(--text-dim)] mb-1 px-1">
