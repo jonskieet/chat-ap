@@ -24,6 +24,7 @@ export default function ChannelDetail() {
   const [messages, setMessages] = useState<Message[]>([])
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
   const [memberCount, setMemberCount] = useState<number | null>(null)
+  const [messagesLoading, setMessagesLoading] = useState(true)
   const [draft, setDraft] = useState('')
   const [typingUser, setTypingUser] = useState<string | null>(null)
   const [openReactionFor, setOpenReactionFor] = useState<string | null>(null)
@@ -32,6 +33,9 @@ export default function ChannelDetail() {
 
   useEffect(() => {
     if (!channelId) return
+    setMessagesLoading(true)
+    setMessages([])
+    setChannel(null)
 
     async function loadChannel() {
       const { data, error } = await supabase.from('channels').select('*').eq('id', channelId).single()
@@ -71,6 +75,7 @@ export default function ChannelDetail() {
         .order('created_at', { ascending: true })
         .limit(50)
       setMessages((data as unknown as Message[]) ?? [])
+      setMessagesLoading(false)
 
       const ids = (data ?? []).map((m) => m.id)
       if (ids.length) {
@@ -102,7 +107,8 @@ export default function ChannelDetail() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message])
+          const incoming = payload.new as Message
+          setMessages((prev) => (prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]))
           markRead()
         }
       )
@@ -147,12 +153,36 @@ export default function ChannelDetail() {
     if (!draft.trim() || !channelId || !profile) return
     const content = draft.trim()
     setDraft('')
-    const { error } = await supabase.from('messages').insert({
+
+    // Optimistic append: hiện ngay trong UI, không đợi Realtime round-trip
+    const tempId = `temp-${Date.now()}`
+    const optimisticMessage: Message = {
+      id: tempId,
       channel_id: channelId,
       sender_id: profile.id,
       content,
-    })
-    if (error) console.error(error)
+      attachment_url: null,
+      created_at: new Date().toISOString(),
+      sender: profile,
+    } as unknown as Message
+    setMessages((prev) => [...prev, optimisticMessage])
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ channel_id: channelId, sender_id: profile.id, content })
+      .select('*, sender:profiles(*)')
+      .single()
+
+    if (error) {
+      console.error(error)
+      // rollback nếu insert thất bại
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      setDraft(content)
+      return
+    }
+
+    // thay message tạm bằng bản ghi thật từ DB (id thật, timestamp thật)
+    setMessages((prev) => prev.map((m) => (m.id === tempId ? (data as unknown as Message) : m)))
   }
 
   async function toggleReaction(messageId: string, emotion: ReactionEmotion) {
@@ -212,18 +242,32 @@ export default function ChannelDetail() {
             <Users size={13} /> {memberCount ?? '—'}
           </span>
         </div>
-        {channel?.is_dm ? (
+        {!channel ? (
+          <div className="relative px-5 mt-4 space-y-2 animate-pulse">
+            <div className="h-6 w-2/3 rounded bg-white/20" />
+            <div className="h-6 w-1/3 rounded bg-white/10" />
+          </div>
+        ) : channel.is_dm ? (
           otherUser?.bio && (
             <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">{otherUser.bio}</p>
           )
         ) : (
-          <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">
-            {channel?.topic ?? (channel ? '' : 'Đang tải chủ đề...')}
-          </p>
+          <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">{channel.topic}</p>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {messagesLoading ? (
+          <>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className={`flex ${i % 2 ? 'justify-end' : 'justify-start'} animate-pulse`}>
+                <div className="h-9 w-40 rounded-2xl bg-[var(--surface)]" />
+              </div>
+            ))}
+          </>
+        ) : messages.length === 0 ? (
+          <p className="text-center text-xs text-[var(--text-dim)] mt-6">Chưa có tin nhắn nào</p>
+        ) : null}
         {messages.map((m) => {
           const mine = m.sender_id === profile?.id
           const msgReactions = reactions[m.id] ?? []
