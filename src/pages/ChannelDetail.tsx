@@ -4,7 +4,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import type { Channel, Message } from '../types'
+import type { Channel, Message, MessageReaction, ReactionEmotion } from '../types'
+
+const QUICK_REACTIONS: ReactionEmotion[] = ['love', 'fire', 'haha', 'wow', 'sad']
+const REACTION_EMOJI: Record<ReactionEmotion, string> = {
+  love: '❤️',
+  fire: '🔥',
+  haha: '😂',
+  wow: '😮',
+  sad: '😢',
+}
 
 export default function ChannelDetail() {
   const { channelId } = useParams()
@@ -12,8 +21,13 @@ export default function ChannelDetail() {
   const { profile } = useAuth()
   const [channel, setChannel] = useState<Channel | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
+  const [memberCount, setMemberCount] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
+  const [typingUser, setTypingUser] = useState<string | null>(null)
+  const [openReactionFor, setOpenReactionFor] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!channelId) return
@@ -21,6 +35,14 @@ export default function ChannelDetail() {
     async function loadChannel() {
       const { data } = await supabase.from('channels').select('*').eq('id', channelId).single()
       setChannel(data)
+    }
+
+    async function loadMemberCount() {
+      const { count } = await supabase
+        .from('channel_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('channel_id', channelId)
+      setMemberCount(count ?? 0)
     }
 
     async function loadMessages() {
@@ -31,12 +53,31 @@ export default function ChannelDetail() {
         .order('created_at', { ascending: true })
         .limit(50)
       setMessages((data as unknown as Message[]) ?? [])
+
+      const ids = (data ?? []).map((m) => m.id)
+      if (ids.length) {
+        const { data: reacts } = await supabase
+          .from('message_reactions')
+          .select('*')
+          .in('message_id', ids)
+        const grouped: Record<string, MessageReaction[]> = {}
+        for (const r of (reacts as MessageReaction[]) ?? []) {
+          grouped[r.message_id] = [...(grouped[r.message_id] ?? []), r]
+        }
+        setReactions(grouped)
+      }
+    }
+
+    async function markRead() {
+      await supabase.rpc('mark_channel_read', { p_channel_id: channelId })
     }
 
     loadChannel()
+    loadMemberCount()
     loadMessages()
+    markRead()
 
-    // Realtime: new messages appear instantly without reload
+    // Realtime: new messages, live reactions, and typing indicator
     const sub = supabase
       .channel(`messages:${channelId}`)
       .on(
@@ -44,18 +85,45 @@ export default function ChannelDetail() {
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
           setMessages((prev) => [...prev, payload.new as Message])
+          markRead()
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'message_reactions' },
+        () => loadMessages()
+      )
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload.userId === profile?.id) return
+        setTypingUser(payload.name ?? 'Someone')
+        setTimeout(() => setTypingUser(null), 2500)
+      })
       .subscribe()
 
     return () => {
       supabase.removeChannel(sub)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
+
+  function broadcastTyping() {
+    if (!channelId || !profile) return
+    supabase.channel(`messages:${channelId}`).send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { userId: profile.id, name: profile.display_name ?? profile.username },
+    })
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value)
+    if (typingTimeout.current) clearTimeout(typingTimeout.current)
+    typingTimeout.current = setTimeout(broadcastTyping, 150)
+  }
 
   async function sendMessage() {
     if (!draft.trim() || !channelId || !profile) return
@@ -67,6 +135,23 @@ export default function ChannelDetail() {
       content,
     })
     if (error) console.error(error)
+  }
+
+  async function toggleReaction(messageId: string, emotion: ReactionEmotion) {
+    if (!profile) return
+    setOpenReactionFor(null)
+    const mine = reactions[messageId]?.find((r) => r.user_id === profile.id)
+    if (mine && mine.emotion === emotion) {
+      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', profile.id)
+    } else if (mine) {
+      await supabase
+        .from('message_reactions')
+        .update({ emotion })
+        .eq('message_id', messageId)
+        .eq('user_id', profile.id)
+    } else {
+      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: profile.id, emotion })
+    }
   }
 
   return (
@@ -91,7 +176,7 @@ export default function ChannelDetail() {
             <MessageCircle size={13} /> {messages.length}
           </span>
           <span className="flex items-center gap-1 text-white/80">
-            <Users size={13} /> —
+            <Users size={13} /> {memberCount ?? '—'}
           </span>
         </div>
         <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">
@@ -102,28 +187,60 @@ export default function ChannelDetail() {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.map((m) => {
           const mine = m.sender_id === profile?.id
+          const msgReactions = reactions[m.id] ?? []
+          const counts = msgReactions.reduce<Partial<Record<ReactionEmotion, number>>>((acc, r) => {
+            acc[r.emotion] = (acc[r.emotion] ?? 0) + 1
+            return acc
+          }, {})
           return (
             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'} items-end gap-2`}>
-              {!mine && (
-                <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0" />
-              )}
+              {!mine && <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0" />}
               <div className="max-w-[75%]">
                 {!mine && (
                   <p className="text-[11px] text-[var(--text-dim)] mb-1 px-1">
                     {m.sender?.display_name ?? m.sender?.username}
                   </p>
                 )}
-                <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm ${
+                <button
+                  onClick={() => setOpenReactionFor(openReactionFor === m.id ? null : m.id)}
+                  className={`text-left rounded-2xl px-4 py-2.5 text-sm focus-ring ${
                     mine ? 'bg-white text-black rounded-br-sm' : 'bg-[var(--surface)] rounded-bl-sm'
                   }`}
                 >
                   {m.content}
-                </div>
+                </button>
+
+                {Object.keys(counts).length > 0 && (
+                  <div className="flex gap-1 mt-1 px-1">
+                    {(Object.entries(counts) as [ReactionEmotion, number][]).map(([emotion, n]) => (
+                      <span key={emotion} className="text-[11px] bg-[var(--surface)] rounded-full px-1.5 py-0.5">
+                        {REACTION_EMOJI[emotion]} {n}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {openReactionFor === m.id && (
+                  <div className="flex gap-1 mt-1 bg-[var(--surface)] rounded-full px-2 py-1 w-fit">
+                    {QUICK_REACTIONS.map((emotion) => (
+                      <button
+                        key={emotion}
+                        onClick={() => toggleReaction(m.id, emotion)}
+                        className="text-base focus-ring rounded-full hover:scale-110 transition"
+                        aria-label={emotion}
+                      >
+                        {REACTION_EMOJI[emotion]}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )
         })}
+        {typingUser && (
+          <p className="text-xs text-[var(--text-dim)] px-2 italic">{typingUser} is typing…</p>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -134,7 +251,7 @@ export default function ChannelDetail() {
           </button>
           <input
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => handleDraftChange(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
             placeholder="Send a message"
             className="flex-1 bg-transparent outline-none text-sm placeholder:text-[var(--text-dim)]"

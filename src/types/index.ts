@@ -64,3 +64,28 @@ export interface PostReaction {
   emotion: ReactionEmotion
   created_at: string
 }
+
+export interface MessageReaction {
+  message_id: string
+  user_id: string
+  emotion: ReactionEmotion
+  created_at: string
+}
+
+// Row shape returned by the get_my_chats() RPC (backs the Chats list screen)
+export interface ChatSummary {
+  channel_id: string
+  name: string
+  topic: string | null
+  cover_url: string | null
+  is_group: boolean
+  is_dm: boolean
+  other_user_id: string | null
+  other_username: string | null
+  other_display_name: string | null
+  other_avatar_url: string | null
+  other_status: 'online' | 'offline' | null
+  last_message: string | null
+  last_message_at: string | null
+  unread_count: number
+}

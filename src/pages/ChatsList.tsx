@@ -1,46 +1,116 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
-import type { Channel } from '../types'
+import { useAuth } from '../context/AuthContext'
+import type { ChatSummary, Channel, Profile } from '../types'
 
 const TABS = ['All', 'Personal', 'Groups', 'Unanswered'] as const
 
 export default function ChatsList() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>('All')
-  const [channels, setChannels] = useState<Channel[]>([])
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [communities, setCommunities] = useState<Channel[]>([])
+  const [suggested, setSuggested] = useState<Profile[]>([])
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      const { data, error } = await supabase
+  const load = useCallback(async () => {
+    setLoading(true)
+
+    const [chatsRes, communitiesRes] = await Promise.all([
+      user ? supabase.rpc('get_my_chats') : Promise.resolve({ data: [], error: null }),
+      supabase
         .from('channels')
         .select('*')
+        .eq('is_group', true)
         .order('created_at', { ascending: false })
-        .limit(20)
-      if (!cancelled) {
-        if (error) console.error(error)
-        setChannels(data ?? [])
-        setLoading(false)
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+        .limit(8),
+    ])
 
-  const communities = [
-    { name: 'Games', emoji: '🎮' },
-    { name: 'Art', emoji: '🎨' },
-    { name: 'Technology', emoji: '💻' },
-    { name: 'Humor', emoji: '😂' },
-  ]
+    if (chatsRes.error) console.error(chatsRes.error)
+    setChats((chatsRes.data as ChatSummary[]) ?? [])
+    setCommunities(communitiesRes.data ?? [])
+
+    // People suggestions: everyone except me
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .neq('id', user?.id ?? '00000000-0000-0000-0000-000000000000')
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (user) {
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id)
+      setFollowingIds(new Set((follows ?? []).map((f) => f.following_id)))
+    }
+
+    setSuggested((allProfiles ?? []).slice(0, 6))
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Realtime: refresh the list whenever a message lands anywhere I'm a member
+  useEffect(() => {
+    if (!user) return
+    const sub = supabase
+      .channel('chats-list-updates')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => load())
+      .subscribe()
+    return () => {
+      supabase.removeChannel(sub)
+    }
+  }, [user, load])
+
+  async function handleFollow(targetId: string) {
+    if (!user) return navigate('/login')
+    const already = followingIds.has(targetId)
+    if (already) {
+      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId)
+      setFollowingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(targetId)
+        return next
+      })
+    } else {
+      const { error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId })
+      if (!error) setFollowingIds((prev) => new Set(prev).add(targetId))
+    }
+  }
+
+  async function handleOpenPerson(targetId: string, username: string) {
+    if (!user) return navigate(`/profile/${username}`)
+    const { data, error } = await supabase.rpc('get_or_create_dm', { other_user: targetId })
+    if (error) {
+      console.error(error)
+      navigate(`/profile/${username}`)
+      return
+    }
+    navigate(`/chats/${data}`)
+  }
+
+  async function handleJoinCommunity(channelId: string) {
+    if (!user) return navigate('/login')
+    await supabase.from('channel_members').upsert({ channel_id: channelId, user_id: user.id })
+    navigate(`/chats/${channelId}`)
+  }
+
+  const filteredChats = useMemo(() => {
+    if (activeTab === 'Personal') return chats.filter((c) => c.is_dm)
+    if (activeTab === 'Groups') return chats.filter((c) => c.is_group)
+    if (activeTab === 'Unanswered') return chats.filter((c) => c.unread_count > 0)
+    return chats
+  }, [chats, activeTab])
 
   return (
     <PhoneShell>
@@ -68,57 +138,108 @@ export default function ChatsList() {
           ))}
         </div>
 
-        {/* Story-style unread avatars */}
-        <div className="flex gap-4 overflow-x-auto pb-2 mb-7 -mx-1 px-1">
+        {/* Story-style avatars — ring + badge reflect unread state */}
+        <div className="flex gap-4 overflow-x-auto pb-2 mb-2 -mx-1 px-1">
           {loading &&
             Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="w-16 h-16 rounded-full bg-[var(--surface)] animate-pulse shrink-0" />
             ))}
-          {!loading && channels.length === 0 && (
+          {!loading && filteredChats.length === 0 && (
             <p className="text-sm text-[var(--text-dim)]">
-              Chưa có cuộc trò chuyện nào. Tạo channel đầu tiên của bạn!
+              {user
+                ? 'Chưa có cuộc trò chuyện nào. Nhắn ai đó ở mục People bên dưới!'
+                : 'Đăng nhập để xem cuộc trò chuyện của bạn.'}
             </p>
           )}
-          {channels.slice(0, 6).map((c) => (
-            <button
-              key={c.id}
-              onClick={() => navigate(`/chats/${c.id}`)}
-              className="shrink-0 focus-ring rounded-full"
-            >
-              <div className="w-16 h-16 rounded-full story-ring p-[2px]">
-                <div className="w-full h-full rounded-full bg-[var(--surface)] border-2 border-[var(--bg)] overflow-hidden flex items-center justify-center text-lg font-semibold">
-                  {c.cover_url ? (
-                    <img src={c.cover_url} alt={c.name} className="w-full h-full object-cover" />
-                  ) : (
-                    c.name.slice(0, 1).toUpperCase()
-                  )}
+          {filteredChats.slice(0, 8).map((c) => {
+            const label = c.is_dm ? c.other_display_name ?? c.other_username ?? 'Direct message' : c.name
+            const avatarUrl = c.is_dm ? c.other_avatar_url : c.cover_url
+            return (
+              <button
+                key={c.channel_id}
+                onClick={() => navigate(`/chats/${c.channel_id}`)}
+                className="shrink-0 focus-ring rounded-full relative"
+              >
+                <div className={`w-16 h-16 rounded-full p-[2px] ${c.unread_count > 0 ? 'story-ring' : 'bg-[var(--border)]'}`}>
+                  <div className="w-full h-full rounded-full bg-[var(--surface)] border-2 border-[var(--bg)] overflow-hidden flex items-center justify-center text-lg font-semibold">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt={label} className="w-full h-full object-cover" />
+                    ) : (
+                      label.slice(0, 1).toUpperCase()
+                    )}
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+                {c.is_dm && c.other_status === 'online' && (
+                  <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-[var(--bg)]" />
+                )}
+                {c.unread_count > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] font-bold flex items-center justify-center">
+                    {c.unread_count > 9 ? '9+' : c.unread_count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Chat previews with last message */}
+        <div className="flex flex-col gap-1 mb-7">
+          {filteredChats.slice(0, 6).map((c) => {
+            const label = c.is_dm ? c.other_display_name ?? c.other_username ?? 'Direct message' : c.name
+            return (
+              <button
+                key={`row-${c.channel_id}`}
+                onClick={() => navigate(`/chats/${c.channel_id}`)}
+                className="flex items-center justify-between gap-3 py-2 focus-ring rounded-xl text-left"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate">{label}</p>
+                  <p className="text-xs text-[var(--text-dim)] truncate max-w-[220px]">
+                    {c.last_message ?? 'Bắt đầu trò chuyện...'}
+                  </p>
+                </div>
+                {c.unread_count > 0 && (
+                  <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-white text-black text-[11px] font-bold flex items-center justify-center">
+                    {c.unread_count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         <section className="mb-8">
           <h2 className="font-display font-bold text-lg mb-0.5">People</h2>
           <p className="text-xs text-[var(--text-dim)] mb-3">Friends' recommendations</p>
           <div className="flex gap-3 overflow-x-auto -mx-1 px-1">
-            {[
-              { name: 'Guy Hawkins', role: 'Tech blogger', tag: 'Green Nature Loving', grad: 'gradient-flame' },
-              { name: 'Jerome Bell', role: 'Fashion influencer', tag: "It's 2024, learn something new", grad: 'gradient-nova' },
-            ].map((p) => (
+            {suggested.length === 0 && !loading && (
+              <p className="text-xs text-[var(--text-dim)]">Chưa có gợi ý nào.</p>
+            )}
+            {suggested.map((p, i) => (
               <div
-                key={p.name}
-                className={`relative shrink-0 w-40 h-52 rounded-2xl overflow-hidden p-3 flex flex-col justify-between ${p.grad}`}
+                key={p.id}
+                className={`relative shrink-0 w-40 h-52 rounded-2xl overflow-hidden p-3 flex flex-col justify-between ${
+                  i % 2 === 0 ? 'gradient-flame' : 'gradient-nova'
+                }`}
               >
-                <div className="flex items-center justify-between">
+                {p.avatar_url && (
+                  <img src={p.avatar_url} alt="" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                )}
+                <button
+                  onClick={() => handleOpenPerson(p.id, p.username)}
+                  className="relative flex items-center justify-between text-left"
+                >
                   <span className="text-xs font-semibold bg-black/30 rounded-full px-2 py-1">
-                    {p.name}
+                    {p.display_name ?? p.username}
                   </span>
-                  <button className="text-[10px] font-bold bg-black rounded-full px-2 py-1 focus-ring">
-                    FOLLOW
-                  </button>
-                </div>
-                <p className="font-display font-bold text-sm leading-tight">{p.tag}</p>
+                </button>
+                <button
+                  onClick={() => handleFollow(p.id)}
+                  className="relative text-[10px] font-bold bg-black rounded-full px-2 py-1 focus-ring self-start"
+                >
+                  {followingIds.has(p.id) ? 'FOLLOWING' : 'FOLLOW'}
+                </button>
+                <p className="relative font-display font-bold text-sm leading-tight">{p.bio ?? '@' + p.username}</p>
               </div>
             ))}
           </div>
@@ -128,12 +249,23 @@ export default function ChatsList() {
           <h2 className="font-display font-bold text-lg mb-0.5">Communities</h2>
           <p className="text-xs text-[var(--text-dim)] mb-3">Popular chat rooms</p>
           <div className="grid grid-cols-4 gap-3">
+            {communities.length === 0 && !loading && (
+              <p className="text-xs text-[var(--text-dim)] col-span-4">Chưa có cộng đồng nào.</p>
+            )}
             {communities.map((c) => (
-              <button key={c.name} className="flex flex-col items-center gap-2 focus-ring rounded-2xl">
-                <div className="w-14 h-14 rounded-full bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center text-xl">
-                  {c.emoji}
+              <button
+                key={c.id}
+                onClick={() => handleJoinCommunity(c.id)}
+                className="flex flex-col items-center gap-2 focus-ring rounded-2xl"
+              >
+                <div className="w-14 h-14 rounded-full bg-[var(--surface)] border border-[var(--border)] overflow-hidden flex items-center justify-center text-xl">
+                  {c.cover_url ? (
+                    <img src={c.cover_url} className="w-full h-full object-cover" />
+                  ) : (
+                    c.name.slice(0, 1).toUpperCase()
+                  )}
                 </div>
-                <span className="text-xs text-[var(--text-dim)]">{c.name}</span>
+                <span className="text-xs text-[var(--text-dim)] truncate max-w-[64px]">{c.name}</span>
               </button>
             ))}
           </div>
