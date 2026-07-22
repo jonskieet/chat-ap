@@ -21,7 +21,7 @@ export default function Home() {
     setLoading(true)
     const { data: postsData, error } = await supabase
       .from('posts')
-      .select('*, author:profiles(*)')
+      .select('*, author:profiles!posts_author_id_fkey(*)')
       .order('created_at', { ascending: false })
       .limit(20)
 
