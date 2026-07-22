@@ -3,14 +3,15 @@ import { ArrowLeft, MessageCircle, Paperclip, Send, Users } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
-import type { Channel, Message, Profile } from '../types'
+import { useAuth } from '../context/AuthContext'
+import type { Channel, Message } from '../types'
 
 export default function ChannelDetail() {
   const { channelId } = useParams()
   const navigate = useNavigate()
+  const { profile } = useAuth()
   const [channel, setChannel] = useState<Channel | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
-  const [profile, setProfile] = useState<Profile | null>(null)
   const [draft, setDraft] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -32,17 +33,8 @@ export default function ChannelDetail() {
       setMessages((data as unknown as Message[]) ?? [])
     }
 
-    async function loadMe() {
-      const { data } = await supabase.auth.getUser()
-      if (data.user) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
-        setProfile(p)
-      }
-    }
-
     loadChannel()
     loadMessages()
-    loadMe()
 
     // Realtime: new messages appear instantly without reload
     const sub = supabase

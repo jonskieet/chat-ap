@@ -10,25 +10,83 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  function isUsernameTaken(err: unknown) {
+    const message = err instanceof Error ? err.message.toLowerCase() : ''
+    return (
+      message.includes('duplicate key') ||
+      message.includes('profiles_username_key') ||
+      (message.includes('username') && message.includes('unique'))
+    )
+  }
 
   async function handleSubmit() {
     setError(null)
+    setInfo(null)
+
+    if (mode === 'signup' && !username.trim()) {
+      setError('Vui lòng nhập tên người dùng')
+      return
+    }
+
     setLoading(true)
     try {
       if (mode === 'signup') {
+        // Check username availability first, before creating the auth user.
+        const { data: existing } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('username', username.trim())
+          .maybeSingle()
+
+        if (existing) {
+          setError('Tên người dùng đã tồn tại')
+          setLoading(false)
+          return
+        }
+
         const { data, error: signUpError } = await supabase.auth.signUp({ email, password })
         if (signUpError) throw signUpError
+
         if (data.user) {
-          await supabase.from('profiles').insert({ id: data.user.id, username })
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({ id: data.user.id, username: username.trim() })
+          if (profileError) {
+            if (isUsernameTaken(profileError)) {
+              setError('Tên người dùng đã tồn tại')
+              setLoading(false)
+              return
+            }
+            throw profileError
+          }
         }
+
+        // If Supabase's "Confirm email" setting is enabled (the default),
+        // signUp does NOT return an active session — the user must confirm
+        // their email before they can sign in.
+        if (!data.session) {
+          setInfo('Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản trước khi đăng nhập.')
+          setMode('login')
+          setPassword('')
+          setLoading(false)
+          return
+        }
+
+        navigate('/')
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
         if (signInError) throw signInError
+        navigate('/')
       }
-      navigate('/chats')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Đã có lỗi xảy ra')
+      if (isUsernameTaken(e)) {
+        setError('Tên người dùng đã tồn tại')
+      } else {
+        setError(e instanceof Error ? e.message : 'Đã có lỗi xảy ra')
+      }
     } finally {
       setLoading(false)
     }
@@ -70,6 +128,7 @@ export default function Login() {
         </div>
 
         {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
+        {info && <p className="text-xs text-emerald-400 mt-3">{info}</p>}
 
         <button
           onClick={handleSubmit}
@@ -80,7 +139,11 @@ export default function Login() {
         </button>
 
         <button
-          onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
+          onClick={() => {
+            setMode(mode === 'login' ? 'signup' : 'login')
+            setError(null)
+            setInfo(null)
+          }}
           className="text-sm text-[var(--text-dim)] mt-4 focus-ring rounded"
         >
           {mode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}

@@ -3,13 +3,24 @@ import { ArrowLeft } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../context/AuthContext'
 import type { Profile as ProfileType } from '../types'
 
 export default function Profile() {
   const { username } = useParams()
   const navigate = useNavigate()
+  const { user, signOut } = useAuth()
   const [profile, setProfile] = useState<ProfileType | null>(null)
   const [stats, setStats] = useState({ followers: 0, following: 0, posts: 0 })
+  const [signingOut, setSigningOut] = useState(false)
+
+  const isOwnProfile = !!user && !!profile && user.id === profile.id
+
+  async function handleSignOut() {
+    setSigningOut(true)
+    await signOut()
+    navigate('/login')
+  }
 
   useEffect(() => {
     if (!username) return
@@ -102,9 +113,19 @@ export default function Profile() {
       </div>
 
       <div className="absolute bottom-0 left-0 right-0 px-5 pb-6 pt-3 bg-gradient-to-t from-[var(--bg)] to-transparent">
-        <button className="w-full gradient-nova text-black font-bold rounded-full py-3.5 focus-ring">
-          FOLLOW
-        </button>
+        {isOwnProfile ? (
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="w-full bg-[var(--surface)] border border-[var(--border)] text-red-400 font-bold rounded-full py-3.5 focus-ring disabled:opacity-50"
+          >
+            {signingOut ? 'Đang đăng xuất...' : 'Đăng xuất'}
+          </button>
+        ) : (
+          <button className="w-full gradient-nova text-black font-bold rounded-full py-3.5 focus-ring">
+            FOLLOW
+          </button>
+        )}
       </div>
     </PhoneShell>
   )

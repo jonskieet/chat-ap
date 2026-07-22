@@ -5,13 +5,14 @@ import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import ReactionButton from '../components/ReactionButton'
 import { supabase } from '../lib/supabaseClient'
-import type { Post, Profile, ReactionEmotion } from '../types'
+import { useAuth } from '../context/AuthContext'
+import type { Post, ReactionEmotion } from '../types'
 
 export default function Home() {
   const navigate = useNavigate()
+  const { user, profile: me } = useAuth()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [me, setMe] = useState<Profile | null>(null)
   const [composerOpen, setComposerOpen] = useState(false)
   const [caption, setCaption] = useState('')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
@@ -32,8 +33,7 @@ export default function Home() {
     }
 
     const list = (postsData as unknown as Post[]) ?? []
-    const { data: userRes } = await supabase.auth.getUser()
-    const uid = userRes.user?.id
+    const uid = user?.id
 
     const enriched = await Promise.all(
       list.map(async (p) => {
@@ -58,14 +58,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    async function loadMe() {
-      const { data } = await supabase.auth.getUser()
-      if (data.user) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
-        setMe(p)
-      }
-    }
-    loadMe()
     loadPosts()
 
     const sub = supabase

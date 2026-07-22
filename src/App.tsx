@@ -4,15 +4,52 @@ import ChatsList from './pages/ChatsList'
 import ChannelDetail from './pages/ChannelDetail'
 import Profile from './pages/Profile'
 import Login from './pages/Login'
+import RequireAuth from './components/RequireAuth'
+import RedirectIfAuthed from './components/RedirectIfAuthed'
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/chats" element={<ChatsList />} />
-      <Route path="/chats/:channelId" element={<ChannelDetail />} />
-      <Route path="/profile/:username" element={<Profile />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <Home />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/login"
+        element={
+          <RedirectIfAuthed>
+            <Login />
+          </RedirectIfAuthed>
+        }
+      />
+      <Route
+        path="/chats"
+        element={
+          <RequireAuth>
+            <ChatsList />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/chats/:channelId"
+        element={
+          <RequireAuth>
+            <ChannelDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/profile/:username"
+        element={
+          <RequireAuth>
+            <Profile />
+          </RequireAuth>
+        }
+      />
     </Routes>
   )
 }
