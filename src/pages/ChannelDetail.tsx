@@ -202,7 +202,9 @@ export default function ChannelDetail() {
           </div>
         </div>
         <div className="relative px-5 mt-4 flex items-center gap-3 text-xs">
-          <span className="bg-black rounded-full px-3 py-1 font-semibold">#{channel?.name ?? 'kenh'}</span>
+          <span className="bg-black rounded-full px-3 py-1 font-semibold">
+            {channel?.is_dm ? `@${otherUser?.username ?? '...'}` : `#${channel?.name ?? 'kenh'}`}
+          </span>
           <span className="flex items-center gap-1 text-white/80">
             <MessageCircle size={13} /> {messages.length}
           </span>
@@ -210,9 +212,15 @@ export default function ChannelDetail() {
             <Users size={13} /> {memberCount ?? '—'}
           </span>
         </div>
-        <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">
-          {channel?.topic ?? 'Đang tải chủ đề...'}
-        </p>
+        {channel?.is_dm ? (
+          otherUser?.bio && (
+            <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">{otherUser.bio}</p>
+          )
+        ) : (
+          <p className="relative px-5 mt-4 font-display font-bold text-2xl leading-tight">
+            {channel?.topic ?? (channel ? '' : 'Đang tải chủ đề...')}
+          </p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
