@@ -112,20 +112,33 @@ export default function PostDetail() {
 
   return (
     <PhoneShell>
-      <div className="flex-1 overflow-y-auto">
-        <div className="relative min-h-[100dvh] flex flex-col justify-end bg-[var(--surface)]">
-          <button
-            onClick={() => navigate(-1)}
-            aria-label="Quay lại"
-            className="absolute top-3 left-3 z-10 w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center focus-ring"
-          >
-            <ArrowLeft size={18} className="text-white" />
-          </button>
+      <div className="flex-1 overflow-y-auto relative">
+        {/* Ambient backdrop: phóng to + làm mờ chính ảnh của post, tạo chiều sâu
+            phía sau card thay vì nền đơn sắc phẳng lì */}
+        {post?.media_url && !loading && !notFound && (
+          <div className="absolute inset-0 overflow-hidden">
+            <img
+              src={post.media_url}
+              className="w-full h-full object-cover scale-125 blur-3xl opacity-60"
+              aria-hidden
+            />
+            <div className="absolute inset-0 bg-black/50" />
+          </div>
+        )}
 
+        <button
+          onClick={() => navigate(-1)}
+          aria-label="Quay lại"
+          className="absolute top-5 left-5 z-20 w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center focus-ring"
+        >
+          <ArrowLeft size={18} className="text-white" />
+        </button>
+
+        <div className="relative z-10 min-h-[100dvh] flex items-center justify-center px-5 py-16">
           {loading ? (
-            <div className="absolute inset-0 skeleton-glass" />
+            <div className="w-full aspect-[3/4] rounded-[2.25rem] skeleton-glass" />
           ) : notFound || !post ? (
-            <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-3 min-h-[100dvh]">
+            <div className="flex flex-col items-center text-center gap-3 px-4">
               <p className="font-display font-bold text-lg">Không tìm thấy bài viết</p>
               <p className="text-sm text-[var(--text-dim)]">
                 Bài viết này có thể đã bị xoá, hoặc bạn không có quyền xem.
@@ -138,13 +151,15 @@ export default function PostDetail() {
               </button>
             </div>
           ) : (
-            <>
+            // Card bo tròn nổi khối — viền sáng mảnh + bóng đổ sâu để tách hẳn
+            // khỏi phông nền mờ phía sau, thay vì tràn kín màn hình như trước.
+            <div className="relative w-full rounded-[2.25rem] overflow-hidden border border-white/15 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] bg-[var(--surface)] flex flex-col justify-end aspect-[3/4]">
               {post.media_url ? (
                 <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
               ) : (
                 <div className="absolute inset-0 gradient-flame opacity-70" />
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
 
               <div className="absolute top-3 right-3 flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-[var(--surface-2)] border border-white/20 overflow-hidden flex items-center justify-center text-xs font-semibold">
@@ -162,7 +177,7 @@ export default function PostDetail() {
                 </button>
               </div>
 
-              <div className="relative px-4 pb-8">
+              <div className="relative px-4 pb-5">
                 {post.caption && (
                   <p className="font-display font-bold text-2xl leading-tight text-white mb-3">{post.caption}</p>
                 )}
@@ -219,7 +234,7 @@ export default function PostDetail() {
                   {new Date(post.created_at).toLocaleDateString('vi-VN')}
                 </p>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
