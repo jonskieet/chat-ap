@@ -19,7 +19,6 @@ export default function Home() {
   const [caption, setCaption] = useState('')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [posting, setPosting] = useState(false)
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const [unreadCount, setUnreadCount] = useState(0)
   const [poppingHeart, setPoppingHeart] = useState<string | null>(null)
