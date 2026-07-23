@@ -28,6 +28,7 @@ export default function Home() {
   const tapTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const feedScrollRef = useRef<HTMLDivElement>(null)
   const parallaxMediaRefs = useRef<Record<string, HTMLElement | null>>({})
+  const postsRef = useRef<Post[]>([])
 
   async function toggleSaved(postId: string) {
     if (!me) return navigate('/login')
@@ -82,8 +83,10 @@ export default function Home() {
     }
   }
 
-  async function loadPosts() {
-    setLoading(true)
+  async function loadPosts(silent = false) {
+    // silent=true: dùng cho refresh nền (realtime), không hiện skeleton để tránh
+    // toàn bộ feed bị unmount/remount gây giật/nhảy ảnh khi đang cuộn hoặc vừa bấm tim
+    if (!silent) setLoading(true)
     const { data: postsData, error } = await supabase
       .from('posts')
       .select('*, author:profiles!posts_author_id_fkey(*)')
@@ -92,8 +95,8 @@ export default function Home() {
 
     if (error) {
       console.error(error)
-      showToast('Không tải được bảng tin, kiểm tra kết nối mạng', 'error')
-      setLoading(false)
+      if (!silent) showToast('Không tải được bảng tin, kiểm tra kết nối mạng', 'error')
+      if (!silent) setLoading(false)
       return
     }
 
@@ -127,7 +130,41 @@ export default function Home() {
     })
 
     setPosts(enriched)
-    setLoading(false)
+    if (!silent) setLoading(false)
+  }
+
+  // Refresh nhẹ chỉ số lượt tim cho các post đang hiển thị, không đụng tới danh sách
+  // post/loading — dùng khi có người khác thả tim, tránh phải load lại (và nhảy) cả feed.
+  async function refreshReactionCounts(postIds: string[]) {
+    if (!postIds.length) return
+    const uid = user?.id
+    const { data: allReactions, error } = await supabase
+      .from('post_reactions')
+      .select('post_id, user_id, emotion')
+      .in('post_id', postIds)
+    if (error) {
+      console.error(error)
+      return
+    }
+
+    const reactionsByPost: Record<string, { user_id: string; emotion: ReactionEmotion }[]> = {}
+    for (const r of allReactions ?? []) {
+      const key = r.post_id as string
+      reactionsByPost[key] = [...(reactionsByPost[key] ?? []), { user_id: r.user_id, emotion: r.emotion as ReactionEmotion }]
+    }
+
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (!postIds.includes(p.id)) return p
+        const counts: Partial<Record<ReactionEmotion, number>> = {}
+        let mine: ReactionEmotion | null = null
+        for (const r of reactionsByPost[p.id] ?? []) {
+          counts[r.emotion] = (counts[r.emotion] ?? 0) + 1
+          if (r.user_id === uid) mine = r.emotion
+        }
+        return { ...p, reaction_counts: counts, my_reaction: mine }
+      })
+    )
   }
 
   async function loadSaved() {
@@ -161,6 +198,12 @@ export default function Home() {
   }
 
   // Dọn timer single-tap khi unmount, tránh gọi navigate() sau khi component đã gỡ
+  // Giữ ref đồng bộ với posts để đọc trong subscription realtime mà không cần
+  // đưa `posts` vào dependency array (tránh subscribe lại kênh mỗi lần feed đổi)
+  useEffect(() => {
+    postsRef.current = posts
+  }, [posts])
+
   useEffect(() => {
     return () => {
       Object.values(tapTimerRef.current).forEach((t) => clearTimeout(t))
@@ -190,11 +233,15 @@ export default function Home() {
 
     const sub = supabase
       .channel('post_reactions_live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions' }, () => {
-        loadPosts()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions' }, (payload) => {
+        // Bỏ qua nếu chính là hành động của mình: đã cập nhật optimistic ngay khi bấm,
+        // gọi lại refresh ở đây chỉ tổ dư thừa (và có thể gây nhấp nháy do race condition).
+        const row = (payload.new ?? payload.old) as { user_id?: string } | null
+        if (row?.user_id && row.user_id === me?.id) return
+        refreshReactionCounts(postsRef.current.map((p) => p.id))
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, () => {
-        loadPosts()
+        loadPosts(true)
       })
       .subscribe()
 
