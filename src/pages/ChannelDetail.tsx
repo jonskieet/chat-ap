@@ -70,7 +70,7 @@ export default function ChannelDetail() {
     async function loadMessages() {
       const { data } = await supabase
         .from('messages')
-        .select('*, sender:profiles(*)')
+        .select('*, sender:profiles!messages_sender_id_fkey(*)')
         .eq('channel_id', channelId)
         .order('created_at', { ascending: true })
         .limit(50)
@@ -170,7 +170,7 @@ export default function ChannelDetail() {
     const { data, error } = await supabase
       .from('messages')
       .insert({ channel_id: channelId, sender_id: profile.id, content })
-      .select('*, sender:profiles(*)')
+      .select('*, sender:profiles!messages_sender_id_fkey(*)')
       .single()
 
     if (error) {
