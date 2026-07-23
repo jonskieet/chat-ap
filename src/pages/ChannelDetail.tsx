@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, MessageCircle, Paperclip, Send, Users } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import type { Channel, Message, MessageReaction, Profile, ReactionEmotion } from '../types'
+import type { Channel, ChatSummary, Message, MessageReaction, Profile, ReactionEmotion } from '../types'
 
 const QUICK_REACTIONS: ReactionEmotion[] = ['love', 'fire', 'haha', 'wow', 'sad']
 const REACTION_EMOJI: Record<ReactionEmotion, string> = {
@@ -18,9 +18,42 @@ const REACTION_EMOJI: Record<ReactionEmotion, string> = {
 export default function ChannelDetail() {
   const { channelId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { profile } = useAuth()
-  const [channel, setChannel] = useState<Channel | null>(null)
-  const [otherUser, setOtherUser] = useState<Profile | null>(null)
+  // Reuse whatever the Chats list already fetched (name/avatar/last message)
+  // so the header renders instantly instead of a blank/shimmer state — the
+  // same trick FB/TikTok use: the list screen already has this data, so the
+  // detail screen shouldn't have to re-fetch it before it can show anything.
+  const preview = (location.state as { preview?: ChatSummary } | null)?.preview
+  const previewChannel: Channel | null =
+    preview && preview.channel_id === channelId
+      ? {
+          id: preview.channel_id,
+          name: preview.name,
+          topic: preview.topic,
+          cover_url: preview.cover_url,
+          is_group: preview.is_group,
+          is_dm: preview.is_dm,
+          created_by: '',
+          created_at: '',
+        }
+      : null
+  const previewOtherUser: Profile | null =
+    preview && preview.channel_id === channelId && preview.is_dm && preview.other_user_id
+      ? {
+          id: preview.other_user_id,
+          username: preview.other_username ?? '',
+          display_name: preview.other_display_name,
+          avatar_url: preview.other_avatar_url,
+          bio: null,
+          status: preview.other_status ?? 'offline',
+          interests: [],
+          created_at: '',
+        }
+      : null
+
+  const [channel, setChannel] = useState<Channel | null>(previewChannel)
+  const [otherUser, setOtherUser] = useState<Profile | null>(previewOtherUser)
   const [messages, setMessages] = useState<Message[]>([])
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({})
   const [memberCount, setMemberCount] = useState<number | null>(null)
@@ -35,7 +68,12 @@ export default function ChannelDetail() {
     if (!channelId) return
     setMessagesLoading(true)
     setMessages([])
-    setChannel(null)
+    // Seed with preview data (if it matches this channel) instead of
+    // wiping to null — avoids a blank/shimmer flash when we already know
+    // the name and avatar from the list. The real fetch below still runs
+    // and reconciles with the authoritative row once it lands.
+    setChannel(previewChannel)
+    setOtherUser(previewOtherUser)
 
     async function loadChannel() {
       const { data, error } = await supabase.from('channels').select('*').eq('id', channelId).single()
@@ -228,7 +266,7 @@ export default function ChannelDetail() {
             </div>
             {channel ? (
               <span className="text-sm font-medium">
-                {channel.is_dm ? otherUser?.display_name ?? otherUser?.username ?? 'Đang tải...' : profile?.display_name ?? 'Bạn'}
+                {channel.is_dm ? otherUser?.display_name ?? otherUser?.username ?? '' : profile?.display_name ?? 'Bạn'}
               </span>
             ) : (
               <span className="h-4 w-16 rounded skeleton-glass inline-block" />

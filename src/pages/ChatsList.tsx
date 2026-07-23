@@ -184,7 +184,7 @@ export default function ChatsList() {
             return (
               <button
                 key={c.channel_id}
-                onClick={() => navigate(`/chats/${c.channel_id}`)}
+                onClick={() => navigate(`/chats/${c.channel_id}`, { state: { preview: c } })}
                 className="shrink-0 focus-ring rounded-full relative"
               >
                 <div className={`w-16 h-16 rounded-full p-[2px] ${c.unread_count > 0 ? 'story-ring' : 'bg-[var(--border)]'}`}>
@@ -216,7 +216,7 @@ export default function ChatsList() {
             return (
               <button
                 key={`row-${c.channel_id}`}
-                onClick={() => navigate(`/chats/${c.channel_id}`)}
+                onClick={() => navigate(`/chats/${c.channel_id}`, { state: { preview: c } })}
                 className="flex items-center justify-between gap-3 py-2 focus-ring rounded-xl text-left"
               >
                 <div className="min-w-0">
