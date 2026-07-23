@@ -3,7 +3,7 @@ import { Check, Search, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import type { ChatSummary, Profile, Story } from '../types'
+import type { ChatSummary, Story } from '../types'
 
 interface Recipient {
   id: string
