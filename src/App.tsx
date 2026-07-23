@@ -3,6 +3,7 @@ import Home from './pages/Home'
 import ChatsList from './pages/ChatsList'
 import ChannelDetail from './pages/ChannelDetail'
 import Profile from './pages/Profile'
+import PostDetail from './pages/PostDetail'
 import Login from './pages/Login'
 import RequireAuth from './components/RequireAuth'
 import RedirectIfAuthed from './components/RedirectIfAuthed'
@@ -50,6 +51,7 @@ export default function App() {
           </RequireAuth>
         }
       />
+      <Route path="/post/:postId" element={<PostDetail />} />
     </Routes>
   )
 }
