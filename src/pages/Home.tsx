@@ -472,6 +472,15 @@ export default function Home() {
                   </button>
                 </div>
 
+                {/* Ẩn bài viết: đưa lên góc phải trên cùng kiểu menu "..." của Instagram thay vì chen vào hàng action bên dưới */}
+                <button
+                  onClick={() => setHiddenIds((prev) => new Set(prev).add(post.id))}
+                  aria-label="Ẩn bài viết"
+                  className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center focus-ring"
+                >
+                  <X size={16} className="text-white" />
+                </button>
+
                 <div className="relative px-4 pb-4">
                   {post.caption && (
                     <p className="font-display font-bold text-2xl leading-tight text-white mb-3">{post.caption}</p>
@@ -490,54 +499,49 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Action panel: đóng / lưu / chia sẻ / thích */}
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setHiddenIds((prev) => new Set(prev).add(post.id))}
-                      aria-label="Ẩn bài viết"
-                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
-                    >
-                      <X size={20} className="text-white" />
-                    </button>
+                  {/* Action panel kiểu Instagram: nhóm tim/bình luận/chia sẻ bên trái, nút lưu tách riêng bên phải */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          handleReact(post, liked ? null : 'love')
+                          triggerHeartPop(post.id)
+                        }}
+                        aria-label="Thích bài viết"
+                        className="h-11 pl-3.5 pr-4 rounded-full flex items-center gap-1.5 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)] shrink-0"
+                        style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
+                      >
+                        <Heart
+                          size={18}
+                          className={`${liked ? 'fill-white text-white' : 'text-white'} ${poppingHeart === post.id ? 'heart-pop' : ''}`}
+                        />
+                        <span className="text-sm font-bold text-white">
+                          {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          withViewTransition(() => navigate(`/post/${post.id}`, { state: { openComments: true } }))
+                        }
+                        aria-label="Bình luận"
+                        className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                      >
+                        <MessageCircle size={17} className="text-white" />
+                      </button>
+                      <button
+                        onClick={() => sharePost(post)}
+                        aria-label="Chia sẻ bài viết"
+                        className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                      >
+                        <Share2 size={17} className="text-white" />
+                      </button>
+                    </div>
                     <button
                       onClick={() => toggleSaved(post.id)}
                       aria-label="Lưu bài viết"
-                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                      className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
                     >
-                      <Star size={19} className={savedIds.has(post.id) ? 'fill-white text-white' : 'text-white'} />
-                    </button>
-                    <button
-                      onClick={() => sharePost(post)}
-                      aria-label="Chia sẻ bài viết"
-                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
-                    >
-                      <Share2 size={18} className="text-white" />
-                    </button>
-                    <button
-                      onClick={() =>
-                        withViewTransition(() => navigate(`/post/${post.id}`, { state: { openComments: true } }))
-                      }
-                      aria-label="Bình luận"
-                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
-                    >
-                      <MessageCircle size={18} className="text-white" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        handleReact(post, liked ? null : 'love')
-                        triggerHeartPop(post.id)
-                      }}
-                      aria-label="Thích bài viết"
-                      className="flex-1 h-12 rounded-full flex items-center justify-center gap-2 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)]"
-                      style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
-                    >
-                      <Heart
-                        size={19}
-                        className={`${liked ? 'fill-white text-white' : 'text-white'} ${poppingHeart === post.id ? 'heart-pop' : ''}`}
-                      />
-                      <span className="text-sm font-bold text-white">
-                        {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
-                      </span>
+                      <Star size={18} className={savedIds.has(post.id) ? 'fill-white text-white' : 'text-white'} />
                     </button>
                   </div>
 

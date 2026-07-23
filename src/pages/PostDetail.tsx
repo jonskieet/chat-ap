@@ -398,56 +398,51 @@ export default function PostDetail() {
                   </div>
                 )}
 
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => navigate(-1)}
-                    aria-label="Đóng"
-                    className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
-                  >
-                    <X size={20} className="text-white" />
-                  </button>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        handleReact(post.my_reaction === 'love' ? null : 'love')
+                        triggerHeartPop()
+                      }}
+                      aria-label="Thích bài viết"
+                      className="h-11 pl-3.5 pr-4 rounded-full flex items-center gap-1.5 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)] shrink-0"
+                      style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
+                    >
+                      <Heart
+                        size={18}
+                        className={`${post.my_reaction === 'love' ? 'fill-white text-white' : 'text-white'} ${poppingHeart ? 'heart-pop' : ''}`}
+                      />
+                      <span className="text-sm font-bold text-white">
+                        {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
+                      </span>
+                    </button>
+                    <button
+                      onClick={openComments}
+                      aria-label="Bình luận"
+                      className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring relative"
+                    >
+                      <MessageCircle size={17} className="text-white" />
+                      {commentCount > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center">
+                          {commentCount > 99 ? '99+' : commentCount}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={sharePost}
+                      aria-label="Chia sẻ bài viết"
+                      className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <Share2 size={17} className="text-white" />
+                    </button>
+                  </div>
                   <button
                     onClick={toggleSaved}
                     aria-label="Lưu bài viết"
-                    className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
                   >
-                    <Star size={19} className={saved ? 'fill-white text-white' : 'text-white'} />
-                  </button>
-                  <button
-                    onClick={sharePost}
-                    aria-label="Chia sẻ bài viết"
-                    className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
-                  >
-                    <Share2 size={18} className="text-white" />
-                  </button>
-                  <button
-                    onClick={openComments}
-                    aria-label="Bình luận"
-                    className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center gap-1 focus-ring relative"
-                  >
-                    <MessageCircle size={18} className="text-white" />
-                    {commentCount > 0 && (
-                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center">
-                        {commentCount > 99 ? '99+' : commentCount}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      handleReact(post.my_reaction === 'love' ? null : 'love')
-                      triggerHeartPop()
-                    }}
-                    aria-label="Thích bài viết"
-                    className="flex-1 h-12 rounded-full flex items-center justify-center gap-2 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)]"
-                    style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
-                  >
-                    <Heart
-                      size={19}
-                      className={`${post.my_reaction === 'love' ? 'fill-white text-white' : 'text-white'} ${poppingHeart ? 'heart-pop' : ''}`}
-                    />
-                    <span className="text-sm font-bold text-white">
-                      {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
-                    </span>
+                    <Star size={18} className={saved ? 'fill-white text-white' : 'text-white'} />
                   </button>
                 </div>
 
