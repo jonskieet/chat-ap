@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import type { Post, ReactionEmotion, SavedPost } from '../types'
+import type { Post, ReactionEmotion } from '../types'
 
 export default function PostDetail() {
   const { postId } = useParams()
