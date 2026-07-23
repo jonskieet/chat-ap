@@ -88,6 +88,13 @@ export interface StoryView {
   viewed_at: string
 }
 
+export interface StoryLike {
+  story_id: string
+  user_id: string
+  created_at: string
+  user?: Profile
+}
+
 export interface StoryGroup {
   authorId: string
   author?: Profile

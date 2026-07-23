@@ -387,11 +387,18 @@ export default function ChannelDetail() {
                   )}
                   <button
                     onClick={() => setOpenReactionFor(openReactionFor === m.id ? null : m.id)}
-                    className={`text-left rounded-2xl px-4 py-2.5 text-sm focus-ring ${
+                    className={`text-left rounded-2xl overflow-hidden text-sm focus-ring ${
                       mine ? 'bg-white text-black rounded-br-sm' : 'bg-[var(--surface)] rounded-bl-sm'
-                    }`}
+                    } ${m.attachment_url ? 'p-1.5' : 'px-4 py-2.5'}`}
                   >
-                    {m.content}
+                    {m.attachment_url && (
+                      <img
+                        src={m.attachment_url}
+                        className="w-40 h-56 object-cover rounded-xl"
+                        alt="Tin đính kèm"
+                      />
+                    )}
+                    {m.content && <span className={m.attachment_url ? 'block px-2 pt-1.5 pb-0.5' : ''}>{m.content}</span>}
                   </button>
 
                   {Object.keys(counts).length > 0 && (

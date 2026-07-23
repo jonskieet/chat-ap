@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Send, Trash2, X } from 'lucide-react'
+import { Heart, Send, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import type { StoryGroup } from '../types'
+import SendStorySheet from './SendStorySheet'
 
 const IMAGE_DURATION_MS = 5000
 
@@ -24,12 +25,19 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
   const [elapsed, setElapsed] = useState(0)
   const [replyText, setReplyText] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({})
+  const [poppingHeart, setPoppingHeart] = useState(false)
+  const [floatingHeart, setFloatingHeart] = useState(false)
+  const [sendSheetOpen, setSendSheetOpen] = useState(false)
   const rafRef = useRef<number | null>(null)
   const lastTsRef = useRef<number | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const lastTapRef = useRef(0)
 
   const stories = group.stories
   const story = stories[index]
+  const liked = story ? likedIds.has(story.id) : false
 
   useEffect(() => {
     if (story) onView(story.id)
@@ -40,6 +48,30 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
     if (stories.length === 0) onClose()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stories.length])
+
+  // Tải trạng thái tim (đã thích chưa + tổng số tim) cho toàn bộ story trong nhóm này
+  useEffect(() => {
+    let cancelled = false
+    async function loadLikes() {
+      const ids = stories.map((s) => s.id)
+      if (ids.length === 0) return
+      const { data, error } = await supabase.from('story_likes').select('story_id, user_id').in('story_id', ids)
+      if (error || cancelled) return
+      const counts: Record<string, number> = {}
+      const mine = new Set<string>()
+      for (const row of data ?? []) {
+        counts[row.story_id] = (counts[row.story_id] ?? 0) + 1
+        if (row.user_id === user?.id) mine.add(row.story_id)
+      }
+      setLikeCounts(counts)
+      setLikedIds(mine)
+    }
+    loadLikes()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group.authorId, user?.id])
 
   // Auto-advance: ảnh chạy theo timer cố định, video chạy theo duration thật
   useEffect(() => {
@@ -88,6 +120,69 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
     if (index > 0) setIndex((i) => i - 1)
   }
 
+  function triggerHeartPop() {
+    setPoppingHeart(true)
+    setTimeout(() => setPoppingHeart(false), 280)
+  }
+
+  async function toggleLike(forceLike = false) {
+    if (!user || !story || isOwn) return
+    const currentlyLiked = likedIds.has(story.id)
+    if (forceLike && currentlyLiked) return
+    const nextLiked = forceLike ? true : !currentlyLiked
+
+    setLikedIds((prev) => {
+      const next = new Set(prev)
+      if (nextLiked) next.add(story.id)
+      else next.delete(story.id)
+      return next
+    })
+    setLikeCounts((prev) => ({
+      ...prev,
+      [story.id]: Math.max(0, (prev[story.id] ?? 0) + (nextLiked ? 1 : -1)),
+    }))
+    triggerHeartPop()
+
+    try {
+      if (nextLiked) {
+        const { error } = await supabase.from('story_likes').insert({ story_id: story.id, user_id: user.id })
+        if (error && error.code !== '23505') throw error
+      } else {
+        const { error } = await supabase.from('story_likes').delete().eq('story_id', story.id).eq('user_id', user.id)
+        if (error) throw error
+      }
+    } catch (e) {
+      console.error(e)
+      // rollback nếu lỗi
+      setLikedIds((prev) => {
+        const next = new Set(prev)
+        if (nextLiked) next.delete(story.id)
+        else next.add(story.id)
+        return next
+      })
+      setLikeCounts((prev) => ({
+        ...prev,
+        [story.id]: Math.max(0, (prev[story.id] ?? 0) + (nextLiked ? -1 : 1)),
+      }))
+      showToast('Không thể thả tim, thử lại nhé', 'error')
+    }
+  }
+
+  // Double-tap lên media để thả tim, giống Instagram
+  function handleMediaTap() {
+    const now = Date.now()
+    if (now - lastTapRef.current < 300) {
+      lastTapRef.current = 0
+      if (!isOwn) {
+        setFloatingHeart(true)
+        setTimeout(() => setFloatingHeart(false), 700)
+        toggleLike(true)
+      }
+    } else {
+      lastTapRef.current = now
+    }
+  }
+
   async function sendReply() {
     if (!user || !story || !replyText.trim() || sendingReply) return
     setSendingReply(true)
@@ -98,6 +193,7 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
         channel_id: channelId,
         sender_id: user.id,
         content: `↩️ Trả lời tin: ${replyText.trim()}`,
+        attachment_url: story.media_url,
       })
       if (msgError) throw msgError
       showToast('Đã gửi trả lời', 'success')
@@ -178,6 +274,7 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
           onPointerDown={() => setPaused(true)}
           onPointerUp={() => setPaused(false)}
           onPointerLeave={() => setPaused(false)}
+          onClick={handleMediaTap}
         >
           {story.media_type === 'video' ? (
             <video
@@ -200,13 +297,19 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
         <button onClick={goPrev} aria-label="Tin trước đó" className="absolute left-0 top-0 bottom-24 w-1/4" />
         <button onClick={goNext} aria-label="Tin tiếp theo" className="absolute right-0 top-0 bottom-24 w-1/4" />
 
+        {floatingHeart && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <Heart size={92} className="text-white fill-white heart-float-pop" />
+          </div>
+        )}
+
         {story.caption && (
           <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 text-center pointer-events-none">
             <p className="font-display font-bold text-2xl leading-tight text-white drop-shadow-lg">{story.caption}</p>
           </div>
         )}
 
-        {!isOwn && (
+        {!isOwn ? (
           <div className="absolute inset-x-4 bottom-5 flex items-center gap-2">
             <input
               value={replyText}
@@ -218,16 +321,37 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
               onKeyDown={(e) => e.key === 'Enter' && sendReply()}
             />
             <button
-              onClick={sendReply}
-              disabled={!replyText.trim() || sendingReply}
-              aria-label="Gửi trả lời"
+              onClick={() => toggleLike()}
+              aria-label={liked ? 'Bỏ thích tin' : 'Thích tin'}
+              className="w-11 h-11 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center focus-ring"
+            >
+              <Heart
+                size={19}
+                className={`${liked ? 'fill-[#ff4f9a] text-[#ff4f9a]' : 'text-white'} ${poppingHeart ? 'heart-pop' : ''}`}
+              />
+            </button>
+            <button
+              onClick={() => (replyText.trim() ? sendReply() : setSendSheetOpen(true))}
+              disabled={sendingReply}
+              aria-label={replyText.trim() ? 'Gửi trả lời' : 'Gửi tin đến...'}
               className="w-11 h-11 shrink-0 rounded-full gradient-nova flex items-center justify-center focus-ring disabled:opacity-40"
             >
               <Send size={16} className="text-black" />
             </button>
           </div>
+        ) : (
+          (likeCounts[story.id] ?? 0) > 0 && (
+            <div className="absolute inset-x-4 bottom-5 flex items-center gap-1.5 text-white/90">
+              <Heart size={15} className="fill-[#ff4f9a] text-[#ff4f9a]" />
+              <span className="text-xs font-semibold">
+                {likeCounts[story.id]} {likeCounts[story.id] === 1 ? 'lượt thích' : 'lượt thích'}
+              </span>
+            </div>
+          )
         )}
       </div>
+
+      {sendSheetOpen && <SendStorySheet story={story} onClose={() => setSendSheetOpen(false)} />}
     </div>
   )
 }
