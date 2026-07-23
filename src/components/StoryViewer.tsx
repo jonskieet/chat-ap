@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Heart, Send, Trash2, X } from 'lucide-react'
+import { Eye, Heart, Send, Trash2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import type { StoryGroup } from '../types'
 import SendStorySheet from './SendStorySheet'
+import StoryViewersSheet from './StoryViewersSheet'
 
 const IMAGE_DURATION_MS = 5000
 
@@ -30,6 +31,8 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
   const [poppingHeart, setPoppingHeart] = useState(false)
   const [floatingHeart, setFloatingHeart] = useState(false)
   const [sendSheetOpen, setSendSheetOpen] = useState(false)
+  const [viewCounts, setViewCounts] = useState<Record<string, number>>({})
+  const [viewersSheetOpen, setViewersSheetOpen] = useState(false)
   const rafRef = useRef<number | null>(null)
   const lastTsRef = useRef<number | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -72,6 +75,26 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.authorId, user?.id])
+
+  // Tải số lượt xem cho từng tin (chỉ chủ tin mới xem được, theo RLS)
+  useEffect(() => {
+    if (!isOwn) return
+    let cancelled = false
+    async function loadViewCounts() {
+      const ids = stories.map((s) => s.id)
+      if (ids.length === 0) return
+      const { data, error } = await supabase.from('story_views').select('story_id').in('story_id', ids)
+      if (error || cancelled) return
+      const counts: Record<string, number> = {}
+      for (const row of data ?? []) counts[row.story_id] = (counts[row.story_id] ?? 0) + 1
+      setViewCounts(counts)
+    }
+    loadViewCounts()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group.authorId, isOwn])
 
   // Auto-advance: ảnh chạy theo timer cố định, video chạy theo duration thật
   useEffect(() => {
@@ -340,18 +363,37 @@ export default function StoryViewer({ group, isOwn, onView, onClose }: StoryView
             </button>
           </div>
         ) : (
-          (likeCounts[story.id] ?? 0) > 0 && (
-            <div className="absolute inset-x-4 bottom-5 flex items-center gap-1.5 text-white/90">
-              <Heart size={15} className="fill-[#ff4f9a] text-[#ff4f9a]" />
-              <span className="text-xs font-semibold">
-                {likeCounts[story.id]} {likeCounts[story.id] === 1 ? 'lượt thích' : 'lượt thích'}
+          <button
+            onClick={() => {
+              setPaused(true)
+              setViewersSheetOpen(true)
+            }}
+            className="absolute inset-x-4 bottom-5 flex items-center gap-3 text-white/90 focus-ring rounded-full w-fit"
+          >
+            <span className="flex items-center gap-1.5">
+              <Eye size={15} />
+              <span className="text-xs font-semibold">{viewCounts[story.id] ?? 0} lượt xem</span>
+            </span>
+            {(likeCounts[story.id] ?? 0) > 0 && (
+              <span className="flex items-center gap-1.5">
+                <Heart size={15} className="fill-[#ff4f9a] text-[#ff4f9a]" />
+                <span className="text-xs font-semibold">{likeCounts[story.id]} lượt thích</span>
               </span>
-            </div>
-          )
+            )}
+          </button>
         )}
       </div>
 
       {sendSheetOpen && <SendStorySheet story={story} onClose={() => setSendSheetOpen(false)} />}
+      {viewersSheetOpen && (
+        <StoryViewersSheet
+          storyId={story.id}
+          onClose={() => {
+            setViewersSheetOpen(false)
+            setPaused(false)
+          }}
+        />
+      )}
     </div>
   )
 }
