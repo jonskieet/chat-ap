@@ -312,7 +312,8 @@ export default function Home() {
                     <button
                       onClick={() => handleReact(post, liked ? null : 'love')}
                       aria-label="Thích bài viết"
-                      className="flex-1 h-12 rounded-full gradient-flame flex items-center justify-center gap-2 focus-ring"
+                      className="flex-1 h-12 rounded-full flex items-center justify-center gap-2 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)]"
+                      style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
                     >
                       <Heart size={19} className={liked ? 'fill-white text-white' : 'text-white'} />
                       <span className="text-sm font-bold text-white">
