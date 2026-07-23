@@ -1,19 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Heart, Share2, Star, X } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import type { Post, ReactionEmotion } from '../types'
 
 export default function PostDetail() {
   const { postId } = useParams()
   const navigate = useNavigate()
   const { user, profile: me } = useAuth()
+  const { showToast } = useToast()
   const [post, setPost] = useState<Post | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
+  const [poppingHeart, setPoppingHeart] = useState(false)
+  const [floatingHeart, setFloatingHeart] = useState(false)
+  const lastTapRef = useRef(0)
 
   async function load() {
     if (!postId) return
@@ -26,7 +31,10 @@ export default function PostDetail() {
       .eq('id', postId)
       .maybeSingle()
 
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      showToast('Không tải được bài viết, kiểm tra kết nối mạng', 'error')
+    }
     if (!data) {
       setNotFound(true)
       setLoading(false)
@@ -65,16 +73,37 @@ export default function PostDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId])
 
+  function applyReactionLocally(prevEmotion: ReactionEmotion | null, nextEmotion: ReactionEmotion | null) {
+    setPost((prev) => {
+      if (!prev) return prev
+      const counts = { ...(prev.reaction_counts ?? {}) }
+      if (prevEmotion) counts[prevEmotion] = Math.max(0, (counts[prevEmotion] ?? 0) - 1)
+      if (nextEmotion) counts[nextEmotion] = (counts[nextEmotion] ?? 0) + 1
+      return { ...prev, reaction_counts: counts, my_reaction: nextEmotion }
+    })
+  }
+
   async function handleReact(emotion: ReactionEmotion | null) {
     if (!me || !post) return navigate('/login')
+    const prevEmotion = post.my_reaction ?? null
+
+    // Optimistic update: không đợi round-trip DB rồi load() lại cả post
+    applyReactionLocally(prevEmotion, emotion)
+
+    let error = null
     if (emotion === null) {
-      await supabase.from('post_reactions').delete().eq('post_id', post.id).eq('user_id', me.id)
-    } else if (post.my_reaction) {
-      await supabase.from('post_reactions').update({ emotion }).eq('post_id', post.id).eq('user_id', me.id)
+      ;({ error } = await supabase.from('post_reactions').delete().eq('post_id', post.id).eq('user_id', me.id))
+    } else if (prevEmotion) {
+      ;({ error } = await supabase.from('post_reactions').update({ emotion }).eq('post_id', post.id).eq('user_id', me.id))
     } else {
-      await supabase.from('post_reactions').insert({ post_id: post.id, user_id: me.id, emotion })
+      ;({ error } = await supabase.from('post_reactions').insert({ post_id: post.id, user_id: me.id, emotion }))
     }
-    load()
+
+    if (error) {
+      console.error(error)
+      applyReactionLocally(emotion, prevEmotion) // rollback
+      showToast('Không thể gửi cảm xúc, thử lại nhé', 'error')
+    }
   }
 
   async function toggleSaved() {
@@ -86,13 +115,39 @@ export default function PostDetail() {
       if (error) {
         console.error(error)
         setSaved(false)
+        showToast('Không thể lưu bài viết, thử lại nhé', 'error')
+      } else {
+        showToast('Đã lưu bài viết', 'success')
       }
     } else {
       const { error } = await supabase.from('saved_posts').delete().eq('post_id', post.id).eq('user_id', me.id)
       if (error) {
         console.error(error)
         setSaved(true)
+        showToast('Không thể bỏ lưu bài viết, thử lại nhé', 'error')
+      } else {
+        showToast('Đã bỏ lưu bài viết', 'success')
       }
+    }
+  }
+
+  function triggerHeartPop() {
+    setPoppingHeart(true)
+    setTimeout(() => setPoppingHeart(false), 280)
+  }
+
+  function handleMediaTap() {
+    const now = Date.now()
+    if (now - lastTapRef.current < 300) {
+      lastTapRef.current = 0
+      setFloatingHeart(true)
+      setTimeout(() => setFloatingHeart(false), 700)
+      if (post && post.my_reaction !== 'love') {
+        handleReact('love')
+        triggerHeartPop()
+      }
+    } else {
+      lastTapRef.current = now
     }
   }
 
@@ -106,7 +161,13 @@ export default function PostDetail() {
         // người dùng huỷ share, bỏ qua
       }
     } else {
-      await navigator.clipboard.writeText(url)
+      try {
+        await navigator.clipboard.writeText(url)
+        showToast('Đã copy link chia sẻ', 'success')
+      } catch (e) {
+        console.error(e)
+        showToast('Không thể copy link, thử lại nhé', 'error')
+      }
     }
   }
 
@@ -154,12 +215,20 @@ export default function PostDetail() {
             // Card bo tròn nổi khối — viền sáng mảnh + bóng đổ sâu để tách hẳn
             // khỏi phông nền mờ phía sau, thay vì tràn kín màn hình như trước.
             <div className="relative w-full rounded-[2.25rem] overflow-hidden border border-white/15 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] bg-[var(--surface)] flex flex-col justify-end aspect-[3/4]">
-              {post.media_url ? (
-                <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 gradient-flame opacity-70" />
+              <div className="absolute inset-0 cursor-pointer" onClick={handleMediaTap}>
+                {post.media_url ? (
+                  <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 gradient-flame opacity-70" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
+              </div>
+
+              {floatingHeart && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <Heart size={100} className="text-white fill-white heart-float-pop" />
+                </div>
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
 
               <div className="absolute top-3 right-3 flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-[var(--surface-2)] border border-white/20 overflow-hidden flex items-center justify-center text-xs font-semibold">
@@ -218,12 +287,18 @@ export default function PostDetail() {
                     <Share2 size={18} className="text-white" />
                   </button>
                   <button
-                    onClick={() => handleReact(post.my_reaction === 'love' ? null : 'love')}
+                    onClick={() => {
+                      handleReact(post.my_reaction === 'love' ? null : 'love')
+                      triggerHeartPop()
+                    }}
                     aria-label="Thích bài viết"
                     className="flex-1 h-12 rounded-full flex items-center justify-center gap-2 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)]"
                     style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
                   >
-                    <Heart size={19} className={post.my_reaction === 'love' ? 'fill-white text-white' : 'text-white'} />
+                    <Heart
+                      size={19}
+                      className={`${post.my_reaction === 'love' ? 'fill-white text-white' : 'text-white'} ${poppingHeart ? 'heart-pop' : ''}`}
+                    />
                     <span className="text-sm font-bold text-white">
                       {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
                     </span>

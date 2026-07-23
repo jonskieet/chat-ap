@@ -5,6 +5,7 @@ import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import type { ChatSummary, Channel, Profile } from '../types'
 
 const TABS = ['All', 'Personal', 'Groups', 'Unanswered'] as const
@@ -12,6 +13,7 @@ const TABS = ['All', 'Personal', 'Groups', 'Unanswered'] as const
 export default function ChatsList() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>('All')
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [communities, setCommunities] = useState<Channel[]>([])
@@ -34,8 +36,11 @@ export default function ChatsList() {
       supabase.rpc('suggested_channels', { p_limit: 8 }),
     ])
 
-    if (chatsRes.error) console.error(chatsRes.error)
-    if (communitiesRes.error) console.error(communitiesRes.error)
+    if (chatsRes.error || communitiesRes.error) {
+      if (chatsRes.error) console.error(chatsRes.error)
+      if (communitiesRes.error) console.error(communitiesRes.error)
+      showToast('Không tải được danh sách trò chuyện', 'error')
+    }
     setChats((chatsRes.data as ChatSummary[]) ?? [])
     setCommunities(communitiesRes.data ?? [])
 
@@ -79,7 +84,12 @@ export default function ChatsList() {
     if (!user) return navigate('/login')
     const already = followingIds.has(targetId)
     if (already) {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId)
+      const { error } = await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId)
+      if (error) {
+        console.error(error)
+        showToast('Không thể bỏ theo dõi, thử lại nhé', 'error')
+        return
+      }
       setFollowingIds((prev) => {
         const next = new Set(prev)
         next.delete(targetId)
@@ -87,7 +97,12 @@ export default function ChatsList() {
       })
     } else {
       const { error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId })
-      if (!error) setFollowingIds((prev) => new Set(prev).add(targetId))
+      if (error) {
+        console.error(error)
+        showToast('Không thể theo dõi, thử lại nhé', 'error')
+        return
+      }
+      setFollowingIds((prev) => new Set(prev).add(targetId))
     }
   }
 
@@ -96,6 +111,7 @@ export default function ChatsList() {
     const { data, error } = await supabase.rpc('get_or_create_dm', { other_user: targetId })
     if (error) {
       console.error(error)
+      showToast('Không thể mở đoạn chat, thử lại nhé', 'error')
       navigate(`/profile/${username}`)
       return
     }

@@ -79,6 +79,22 @@ export interface SavedPost {
   created_at: string
 }
 
+export type NotificationType = 'message' | 'post_reaction' | 'message_reaction'
+
+export interface AppNotification {
+  id: string
+  user_id: string
+  actor_id: string
+  type: NotificationType
+  channel_id: string | null
+  message_id: string | null
+  post_id: string | null
+  emotion: ReactionEmotion | null
+  read: boolean
+  created_at: string
+  actor?: Profile
+}
+
 // Row shape returned by the get_my_chats() RPC (backs the Chats list screen)
 export interface ChatSummary {
   channel_id: string

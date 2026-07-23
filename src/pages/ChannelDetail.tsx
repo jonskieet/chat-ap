@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import type { Channel, ChatSummary, Message, MessageReaction, Profile, ReactionEmotion } from '../types'
 
 const QUICK_REACTIONS: ReactionEmotion[] = ['love', 'fire', 'haha', 'wow', 'sad']
@@ -20,6 +21,7 @@ export default function ChannelDetail() {
   const navigate = useNavigate()
   const location = useLocation()
   const { profile } = useAuth()
+  const { showToast } = useToast()
   // Reuse whatever the Chats list already fetched (name/avatar/last message)
   // so the header renders instantly instead of a blank/shimmer state — the
   // same trick FB/TikTok use: the list screen already has this data, so the
@@ -61,6 +63,7 @@ export default function ChannelDetail() {
   const [draft, setDraft] = useState('')
   const [typingUser, setTypingUser] = useState<string | null>(null)
   const [openReactionFor, setOpenReactionFor] = useState<string | null>(null)
+  const [otherReadAt, setOtherReadAt] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -77,7 +80,10 @@ export default function ChannelDetail() {
 
     async function loadChannel() {
       const { data, error } = await supabase.from('channels').select('*').eq('id', channelId).single()
-      if (error) console.error(error)
+      if (error) {
+        console.error(error)
+        showToast('Không tải được cuộc trò chuyện', 'error')
+      }
       setChannel(data)
 
       if (data?.is_dm) {
@@ -133,12 +139,32 @@ export default function ChannelDetail() {
       await supabase.rpc('mark_channel_read', { p_channel_id: channelId })
     }
 
+    async function loadOtherReadState() {
+      // Chỉ áp dụng cho DM 1-1: lấy read cursor của người còn lại để hiển thị "Đã xem"
+      const { data: members } = await supabase
+        .from('channel_members')
+        .select('user_id')
+        .eq('channel_id', channelId)
+        .neq('user_id', profile?.id ?? '00000000-0000-0000-0000-000000000000')
+        .limit(1)
+      const otherId = members?.[0]?.user_id
+      if (!otherId) return
+      const { data: readRow } = await supabase
+        .from('channel_reads')
+        .select('last_read_at')
+        .eq('channel_id', channelId)
+        .eq('user_id', otherId)
+        .maybeSingle()
+      setOtherReadAt(readRow?.last_read_at ?? null)
+    }
+
     loadChannel()
     loadMemberCount()
     loadMessages()
+    loadOtherReadState()
     markRead()
 
-    // Realtime: new messages, live reactions, and typing indicator
+    // Realtime: new messages, live reactions, typing indicator, và trạng thái đã xem
     const sub = supabase
       .channel(`messages:${channelId}`)
       .on(
@@ -154,6 +180,14 @@ export default function ChannelDetail() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'message_reactions' },
         () => loadMessages()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'channel_reads', filter: `channel_id=eq.${channelId}` },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as { user_id: string; last_read_at: string } | null
+          if (row && row.user_id !== profile?.id) setOtherReadAt(row.last_read_at)
+        }
       )
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         if (payload.userId === profile?.id) return
@@ -216,6 +250,7 @@ export default function ChannelDetail() {
       // rollback nếu insert thất bại
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
       setDraft(content)
+      showToast('Gửi tin nhắn thất bại, thử lại nhé', 'error')
       return
     }
 
@@ -227,16 +262,21 @@ export default function ChannelDetail() {
     if (!profile) return
     setOpenReactionFor(null)
     const mine = reactions[messageId]?.find((r) => r.user_id === profile.id)
+    let error = null
     if (mine && mine.emotion === emotion) {
-      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', profile.id)
+      ;({ error } = await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', profile.id))
     } else if (mine) {
-      await supabase
+      ;({ error } = await supabase
         .from('message_reactions')
         .update({ emotion })
         .eq('message_id', messageId)
-        .eq('user_id', profile.id)
+        .eq('user_id', profile.id))
     } else {
-      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: profile.id, emotion })
+      ;({ error } = await supabase.from('message_reactions').insert({ message_id: messageId, user_id: profile.id, emotion }))
+    }
+    if (error) {
+      console.error(error)
+      showToast('Không thể gửi cảm xúc, thử lại nhé', 'error')
     }
   }
 
@@ -317,67 +357,74 @@ export default function ChannelDetail() {
         ) : messages.length === 0 ? (
           <p className="text-center text-xs text-[var(--text-dim)] mt-6">Chưa có tin nhắn nào</p>
         ) : null}
-        {messages.map((m) => {
-          const mine = m.sender_id === profile?.id
-          const msgReactions = reactions[m.id] ?? []
-          const counts = msgReactions.reduce<Partial<Record<ReactionEmotion, number>>>((acc, r) => {
-            acc[r.emotion] = (acc[r.emotion] ?? 0) + 1
-            return acc
-          }, {})
-          return (
-            <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'} items-end gap-2`}>
-              {!mine && (
-                <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0 overflow-hidden flex items-center justify-center text-[11px] font-semibold">
-                  {m.sender?.avatar_url ? (
-                    <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    (m.sender?.display_name ?? m.sender?.username ?? '?').slice(0, 1).toUpperCase()
-                  )}
-                </div>
-              )}
-              <div className="max-w-[75%]">
+        {(() => {
+          const mineMessages = messages.filter((m) => m.sender_id === profile?.id)
+          const lastMineId = mineMessages.length ? mineMessages[mineMessages.length - 1].id : null
+          return messages.map((m) => {
+            const mine = m.sender_id === profile?.id
+            const msgReactions = reactions[m.id] ?? []
+            const counts = msgReactions.reduce<Partial<Record<ReactionEmotion, number>>>((acc, r) => {
+              acc[r.emotion] = (acc[r.emotion] ?? 0) + 1
+              return acc
+            }, {})
+            const seen = mine && m.id === lastMineId && otherReadAt && new Date(otherReadAt) >= new Date(m.created_at)
+            return (
+              <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'} items-end gap-2`}>
                 {!mine && (
-                  <p className="text-[11px] text-[var(--text-dim)] mb-1 px-1">
-                    {m.sender?.display_name ?? m.sender?.username}
-                  </p>
-                )}
-                <button
-                  onClick={() => setOpenReactionFor(openReactionFor === m.id ? null : m.id)}
-                  className={`text-left rounded-2xl px-4 py-2.5 text-sm focus-ring ${
-                    mine ? 'bg-white text-black rounded-br-sm' : 'bg-[var(--surface)] rounded-bl-sm'
-                  }`}
-                >
-                  {m.content}
-                </button>
-
-                {Object.keys(counts).length > 0 && (
-                  <div className="flex gap-1 mt-1 px-1">
-                    {(Object.entries(counts) as [ReactionEmotion, number][]).map(([emotion, n]) => (
-                      <span key={emotion} className="text-[11px] bg-[var(--surface)] rounded-full px-1.5 py-0.5">
-                        {REACTION_EMOJI[emotion]} {n}
-                      </span>
-                    ))}
+                  <div className="w-7 h-7 rounded-full bg-[var(--surface-2)] shrink-0 overflow-hidden flex items-center justify-center text-[11px] font-semibold">
+                    {m.sender?.avatar_url ? (
+                      <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      (m.sender?.display_name ?? m.sender?.username ?? '?').slice(0, 1).toUpperCase()
+                    )}
                   </div>
                 )}
+                <div className="max-w-[75%]">
+                  {!mine && (
+                    <p className="text-[11px] text-[var(--text-dim)] mb-1 px-1">
+                      {m.sender?.display_name ?? m.sender?.username}
+                    </p>
+                  )}
+                  <button
+                    onClick={() => setOpenReactionFor(openReactionFor === m.id ? null : m.id)}
+                    className={`text-left rounded-2xl px-4 py-2.5 text-sm focus-ring ${
+                      mine ? 'bg-white text-black rounded-br-sm' : 'bg-[var(--surface)] rounded-bl-sm'
+                    }`}
+                  >
+                    {m.content}
+                  </button>
 
-                {openReactionFor === m.id && (
-                  <div className="flex gap-1 mt-1 bg-[var(--surface)] rounded-full px-2 py-1 w-fit">
-                    {QUICK_REACTIONS.map((emotion) => (
-                      <button
-                        key={emotion}
-                        onClick={() => toggleReaction(m.id, emotion)}
-                        className="text-base focus-ring rounded-full hover:scale-110 transition"
-                        aria-label={emotion}
-                      >
-                        {REACTION_EMOJI[emotion]}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  {Object.keys(counts).length > 0 && (
+                    <div className="flex gap-1 mt-1 px-1">
+                      {(Object.entries(counts) as [ReactionEmotion, number][]).map(([emotion, n]) => (
+                        <span key={emotion} className="text-[11px] bg-[var(--surface)] rounded-full px-1.5 py-0.5">
+                          {REACTION_EMOJI[emotion]} {n}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {openReactionFor === m.id && (
+                    <div className="flex gap-1 mt-1 bg-[var(--surface)] rounded-full px-2 py-1 w-fit">
+                      {QUICK_REACTIONS.map((emotion) => (
+                        <button
+                          key={emotion}
+                          onClick={() => toggleReaction(m.id, emotion)}
+                          className="text-base focus-ring rounded-full hover:scale-110 transition"
+                          aria-label={emotion}
+                        >
+                          {REACTION_EMOJI[emotion]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {seen && <p className="text-[10px] text-[var(--text-dim)] mt-1 px-1 text-right">Đã xem</p>}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })
+        })()}
         {typingUser && (
           <p className="text-xs text-[var(--text-dim)] px-2 italic">{typingUser} is typing…</p>
         )}

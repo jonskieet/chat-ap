@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Camera, MessageCircle, Pencil, Settings, X } from 'lucide-react'
+import { ArrowLeft, Camera, MessageCircle, Pencil, Settings, Star, X } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import type { Post, Profile as ProfileType } from '../types'
 
 export default function Profile() {
   const { username } = useParams()
   const navigate = useNavigate()
   const { user, signOut, refreshProfile } = useAuth()
+  const { showToast } = useToast()
   const [profile, setProfile] = useState<ProfileType | null>(null)
   const [stats, setStats] = useState({ followers: 0, following: 0, posts: 0 })
   const [isFollowing, setIsFollowing] = useState(false)
@@ -175,6 +177,7 @@ export default function Profile() {
       // Roll back the optimistic update.
       setIsFollowing(wasFollowing)
       setStats((s) => ({ ...s, followers: s.followers + (wasFollowing ? 1 : -1) }))
+      showToast(wasFollowing ? 'Không thể bỏ theo dõi, thử lại nhé' : 'Không thể theo dõi, thử lại nhé', 'error')
     } finally {
       setFollowBusy(false)
     }
@@ -189,6 +192,7 @@ export default function Profile() {
       navigate(`/chats/${data}`)
     } catch (e) {
       console.error(e)
+      showToast('Không thể mở đoạn chat, thử lại nhé', 'error')
     } finally {
       setMessageBusy(false)
     }
@@ -499,6 +503,16 @@ export default function Profile() {
             >
               <Pencil size={16} />
               <span className="text-sm font-medium">Chỉnh sửa hồ sơ</span>
+            </button>
+            <button
+              onClick={() => {
+                setSettingsOpen(false)
+                navigate('/saved')
+              }}
+              className="w-full text-left px-4 py-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] mb-3 focus-ring flex items-center gap-3"
+            >
+              <Star size={16} />
+              <span className="text-sm font-medium">Bài đã lưu</span>
             </button>
             <button
               onClick={handleSignOut}

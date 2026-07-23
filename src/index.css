@@ -81,3 +81,63 @@ h1, h2, h3, .font-display {
     transform: translateX(100%);
   }
 }
+
+/* Toast: trượt nhẹ từ trên xuống + fade in */
+.toast-enter {
+  animation: toast-slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Nút tim nảy khi bấm thích: spring 1 -> 1.3 -> 1 */
+.heart-pop {
+  animation: heart-pop 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes heart-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Tim to giữa ảnh khi double-tap, chuẩn Instagram: bung ra rồi fade */
+.heart-float-pop {
+  animation: heart-float-pop 700ms ease-out forwards;
+  filter: drop-shadow(0 4px 18px rgba(0, 0, 0, 0.35));
+}
+
+@keyframes heart-float-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  40% {
+    transform: scale(0.95);
+  }
+  55% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}

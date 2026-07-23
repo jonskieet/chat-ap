@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Bell, Heart, MessageSquare, Plus, Share2, Star, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import type { Post, ReactionEmotion, SavedPost } from '../types'
 
 export default function Home() {
   const navigate = useNavigate()
   const { user, profile: me } = useAuth()
+  const { showToast } = useToast()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [composerOpen, setComposerOpen] = useState(false)
@@ -18,6 +20,10 @@ export default function Home() {
   const [posting, setPosting] = useState(false)
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [poppingHeart, setPoppingHeart] = useState<string | null>(null)
+  const [floatingHeart, setFloatingHeart] = useState<string | null>(null)
+  const lastTapRef = useRef<Record<string, number>>({})
 
   async function toggleSaved(postId: string) {
     if (!me) return navigate('/login')
@@ -33,6 +39,9 @@ export default function Home() {
       if (error) {
         console.error(error)
         setSavedIds((prev) => new Set(prev).add(postId)) // rollback
+        showToast('Không thể bỏ lưu bài viết, thử lại nhé', 'error')
+      } else {
+        showToast('Đã bỏ lưu bài viết', 'success')
       }
     } else {
       const { error } = await supabase.from('saved_posts').insert({ post_id: postId, user_id: me.id })
@@ -43,6 +52,9 @@ export default function Home() {
           next.delete(postId)
           return next
         })
+        showToast('Không thể lưu bài viết, thử lại nhé', 'error')
+      } else {
+        showToast('Đã lưu bài viết', 'success')
       }
     }
   }
@@ -56,7 +68,13 @@ export default function Home() {
         // người dùng huỷ share, bỏ qua
       }
     } else {
-      await navigator.clipboard.writeText(url)
+      try {
+        await navigator.clipboard.writeText(url)
+        showToast('Đã copy link chia sẻ', 'success')
+      } catch (e) {
+        console.error(e)
+        showToast('Không thể copy link, thử lại nhé', 'error')
+      }
     }
   }
 
@@ -70,30 +88,39 @@ export default function Home() {
 
     if (error) {
       console.error(error)
+      showToast('Không tải được bảng tin, kiểm tra kết nối mạng', 'error')
       setLoading(false)
       return
     }
 
     const list = (postsData as unknown as Post[]) ?? []
     const uid = user?.id
+    const ids = list.map((p) => p.id)
 
-    const enriched = await Promise.all(
-      list.map(async (p) => {
-        const { data: reactions } = await supabase
-          .from('post_reactions')
-          .select('user_id, emotion')
-          .eq('post_id', p.id)
+    // 1 query duy nhất cho toàn bộ post_reactions thay vì loop N+1 như trước
+    let reactionsByPost: Record<string, { user_id: string; emotion: ReactionEmotion }[]> = {}
+    if (ids.length) {
+      const { data: allReactions } = await supabase
+        .from('post_reactions')
+        .select('post_id, user_id, emotion')
+        .in('post_id', ids)
 
-        const counts: Partial<Record<ReactionEmotion, number>> = {}
-        let mine: ReactionEmotion | null = null
-        for (const r of reactions ?? []) {
-          const emo = r.emotion as ReactionEmotion
-          counts[emo] = (counts[emo] ?? 0) + 1
-          if (r.user_id === uid) mine = emo
-        }
-        return { ...p, reaction_counts: counts, my_reaction: mine }
-      })
-    )
+      reactionsByPost = {}
+      for (const r of allReactions ?? []) {
+        const key = r.post_id as string
+        reactionsByPost[key] = [...(reactionsByPost[key] ?? []), { user_id: r.user_id, emotion: r.emotion as ReactionEmotion }]
+      }
+    }
+
+    const enriched = list.map((p) => {
+      const counts: Partial<Record<ReactionEmotion, number>> = {}
+      let mine: ReactionEmotion | null = null
+      for (const r of reactionsByPost[p.id] ?? []) {
+        counts[r.emotion] = (counts[r.emotion] ?? 0) + 1
+        if (r.user_id === uid) mine = r.emotion
+      }
+      return { ...p, reaction_counts: counts, my_reaction: mine }
+    })
 
     setPosts(enriched)
     setLoading(false)
@@ -111,6 +138,40 @@ export default function Home() {
     }
     setSavedIds(new Set(((data as SavedPost[]) ?? []).map((s) => s.post_id)))
   }
+
+  async function loadUnreadCount() {
+    if (!me) {
+      setUnreadCount(0)
+      return
+    }
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', me.id)
+      .eq('read', false)
+    if (error) {
+      console.error(error)
+      return
+    }
+    setUnreadCount(count ?? 0)
+  }
+
+  useEffect(() => {
+    loadUnreadCount()
+    if (!me) return
+    const sub = supabase
+      .channel(`notifications_badge:${me.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${me.id}` },
+        () => loadUnreadCount()
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(sub)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id])
 
   useEffect(() => {
     loadPosts()
@@ -132,20 +193,66 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id])
 
+  function applyReactionLocally(postId: string, prevEmotion: ReactionEmotion | null, nextEmotion: ReactionEmotion | null) {
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p
+        const counts = { ...(p.reaction_counts ?? {}) }
+        if (prevEmotion) counts[prevEmotion] = Math.max(0, (counts[prevEmotion] ?? 0) - 1)
+        if (nextEmotion) counts[nextEmotion] = (counts[nextEmotion] ?? 0) + 1
+        return { ...p, reaction_counts: counts, my_reaction: nextEmotion }
+      })
+    )
+  }
+
   async function handleReact(post: Post, emotion: ReactionEmotion | null) {
     if (!me) return
+    const prevEmotion = post.my_reaction ?? null
+
+    // Optimistic update: cập nhật UI ngay, không đợi round-trip DB rồi loadPosts() lại toàn bộ feed
+    applyReactionLocally(post.id, prevEmotion, emotion)
+
+    let error = null
     if (emotion === null) {
-      await supabase.from('post_reactions').delete().eq('post_id', post.id).eq('user_id', me.id)
-    } else if (post.my_reaction) {
-      await supabase
+      ;({ error } = await supabase.from('post_reactions').delete().eq('post_id', post.id).eq('user_id', me.id))
+    } else if (prevEmotion) {
+      ;({ error } = await supabase
         .from('post_reactions')
         .update({ emotion })
         .eq('post_id', post.id)
-        .eq('user_id', me.id)
+        .eq('user_id', me.id))
     } else {
-      await supabase.from('post_reactions').insert({ post_id: post.id, user_id: me.id, emotion })
+      ;({ error } = await supabase.from('post_reactions').insert({ post_id: post.id, user_id: me.id, emotion }))
     }
-    loadPosts()
+
+    if (error) {
+      console.error(error)
+      // rollback nếu request thất bại
+      applyReactionLocally(post.id, emotion, prevEmotion)
+      showToast('Không thể gửi cảm xúc, thử lại nhé', 'error')
+    }
+  }
+
+  function handleMediaTap(post: Post) {
+    const now = Date.now()
+    const last = lastTapRef.current[post.id] ?? 0
+    if (now - last < 300) {
+      lastTapRef.current[post.id] = 0
+      // Double-tap kiểu Instagram: luôn like (không unlike), kèm tim to hiện giữa ảnh rồi fade
+      setFloatingHeart(post.id)
+      setTimeout(() => setFloatingHeart(null), 700)
+      if (post.my_reaction !== 'love') {
+        handleReact(post, 'love')
+        triggerHeartPop(post.id)
+      }
+    } else {
+      lastTapRef.current[post.id] = now
+    }
+  }
+
+  function triggerHeartPop(postId: string) {
+    setPoppingHeart(postId)
+    setTimeout(() => setPoppingHeart(null), 280)
   }
 
   async function submitPost() {
@@ -169,9 +276,11 @@ export default function Home() {
       setCaption('')
       setMediaFile(null)
       setComposerOpen(false)
+      showToast('Đã đăng bài viết', 'success')
       loadPosts()
     } catch (e) {
       console.error(e)
+      showToast('Đăng bài thất bại, thử lại nhé', 'error')
     } finally {
       setPosting(false)
     }
@@ -182,8 +291,17 @@ export default function Home() {
       <div className="flex items-center justify-between px-5 pt-6 pb-4 shrink-0">
         <h1 className="font-display text-2xl font-bold">Home</h1>
         <div className="flex items-center gap-2">
-          <button className="w-9 h-9 rounded-full bg-[var(--surface)] flex items-center justify-center focus-ring" aria-label="Thông báo">
+          <button
+            onClick={() => navigate('/notifications')}
+            className="relative w-9 h-9 rounded-full bg-[var(--surface)] flex items-center justify-center focus-ring"
+            aria-label="Thông báo"
+          >
             <Bell size={16} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#ff4f9a] text-white text-[10px] font-bold flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => navigate('/chats')}
@@ -245,12 +363,20 @@ export default function Home() {
             const tags = post.author?.interests?.slice(0, 4) ?? []
             return (
               <div key={post.id} className="relative rounded-3xl overflow-hidden bg-[var(--surface)] min-h-[420px] flex flex-col justify-end">
-                {post.media_url ? (
-                  <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 gradient-flame opacity-70" />
+                <div className="absolute inset-0 cursor-pointer" onClick={() => handleMediaTap(post)}>
+                  {post.media_url ? (
+                    <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 gradient-flame opacity-70" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+                </div>
+
+                {floatingHeart === post.id && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <Heart size={92} className="text-white fill-white heart-float-pop" />
+                  </div>
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
 
                 <div className="absolute top-3 left-3 flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-[var(--surface-2)] border border-white/20 overflow-hidden flex items-center justify-center text-xs font-semibold">
@@ -310,12 +436,18 @@ export default function Home() {
                       <Share2 size={18} className="text-white" />
                     </button>
                     <button
-                      onClick={() => handleReact(post, liked ? null : 'love')}
+                      onClick={() => {
+                        handleReact(post, liked ? null : 'love')
+                        triggerHeartPop(post.id)
+                      }}
                       aria-label="Thích bài viết"
                       className="flex-1 h-12 rounded-full flex items-center justify-center gap-2 focus-ring shadow-[0_4px_18px_rgba(255,90,120,0.45)]"
                       style={{ background: 'linear-gradient(135deg, #ff8a5c 0%, #ff5e8f 55%, #ff4f9a 100%)' }}
                     >
-                      <Heart size={19} className={liked ? 'fill-white text-white' : 'text-white'} />
+                      <Heart
+                        size={19}
+                        className={`${liked ? 'fill-white text-white' : 'text-white'} ${poppingHeart === post.id ? 'heart-pop' : ''}`}
+                      />
                       <span className="text-sm font-bold text-white">
                         {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
                       </span>

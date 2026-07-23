@@ -4,6 +4,8 @@ import ChatsList from './pages/ChatsList'
 import ChannelDetail from './pages/ChannelDetail'
 import Profile from './pages/Profile'
 import PostDetail from './pages/PostDetail'
+import SavedPosts from './pages/SavedPosts'
+import Notifications from './pages/Notifications'
 import Login from './pages/Login'
 import RequireAuth from './components/RequireAuth'
 import RedirectIfAuthed from './components/RedirectIfAuthed'
@@ -48,6 +50,22 @@ export default function App() {
         element={
           <RequireAuth>
             <Profile />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/saved"
+        element={
+          <RequireAuth>
+            <SavedPosts />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <RequireAuth>
+            <Notifications />
           </RequireAuth>
         }
       />
