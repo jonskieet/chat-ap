@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Bell, MessageSquare, Plus, X } from 'lucide-react'
+import { Bell, Heart, MessageSquare, Plus, Share2, Star, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
-import ReactionButton from '../components/ReactionButton'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import type { Post, ReactionEmotion } from '../types'
@@ -17,6 +16,29 @@ export default function Home() {
   const [caption, setCaption] = useState('')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [posting, setPosting] = useState(false)
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+
+  function toggleSaved(postId: string) {
+    setSavedIds((prev) => {
+      const next = new Set(prev)
+      next.has(postId) ? next.delete(postId) : next.add(postId)
+      return next
+    })
+  }
+
+  async function sharePost(post: Post) {
+    const url = `${window.location.origin}/post/${post.id}`
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: post.author?.username ? `@${post.author.username}` : 'Bài viết', text: post.caption ?? '', url })
+      } catch {
+        // người dùng huỷ share, bỏ qua
+      }
+    } else {
+      await navigator.clipboard.writeText(url)
+    }
+  }
 
   async function loadPosts() {
     setLoading(true)
@@ -182,47 +204,96 @@ export default function Home() {
             </button>
           </div>
         )}
-        {posts.map((post) => (
-          <div key={post.id} className="relative rounded-3xl overflow-hidden bg-[var(--surface)] min-h-[340px] flex flex-col justify-end">
-            {post.media_url ? (
-              <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
-            ) : (
-              <div className="absolute inset-0 gradient-flame opacity-70" />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
-
-            <div className="absolute top-3 left-3 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-[var(--surface-2)] border border-white/20 overflow-hidden flex items-center justify-center text-xs font-semibold">
-                {post.author?.avatar_url ? (
-                  <img src={post.author.avatar_url} className="w-full h-full object-cover" />
+        {posts
+          .filter((post) => !hiddenIds.has(post.id))
+          .map((post) => {
+            const liked = post.my_reaction === 'love'
+            const tags = post.author?.interests?.slice(0, 4) ?? []
+            return (
+              <div key={post.id} className="relative rounded-3xl overflow-hidden bg-[var(--surface)] min-h-[420px] flex flex-col justify-end">
+                {post.media_url ? (
+                  <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
                 ) : (
-                  post.author?.username?.slice(0, 1).toUpperCase()
+                  <div className="absolute inset-0 gradient-flame opacity-70" />
                 )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+
+                <div className="absolute top-3 left-3 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-[var(--surface-2)] border border-white/20 overflow-hidden flex items-center justify-center text-xs font-semibold">
+                    {post.author?.avatar_url ? (
+                      <img src={post.author.avatar_url} className="w-full h-full object-cover" />
+                    ) : (
+                      post.author?.username?.slice(0, 1).toUpperCase()
+                    )}
+                  </div>
+                  <button
+                    onClick={() => post.author?.username && navigate(`/profile/${post.author.username}`)}
+                    className="text-xs font-semibold bg-black/40 rounded-full px-2.5 py-1 focus-ring"
+                  >
+                    @{post.author?.username ?? 'unknown'}
+                  </button>
+                </div>
+
+                <div className="relative px-4 pb-4">
+                  {post.caption && (
+                    <p className="font-display font-bold text-2xl leading-tight text-white mb-3">{post.caption}</p>
+                  )}
+
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-xs font-medium bg-white/15 backdrop-blur-sm border border-white/10 rounded-full px-3 py-1.5"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action panel: đóng / lưu / chia sẻ / thích */}
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setHiddenIds((prev) => new Set(prev).add(post.id))}
+                      aria-label="Ẩn bài viết"
+                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <X size={20} className="text-white" />
+                    </button>
+                    <button
+                      onClick={() => toggleSaved(post.id)}
+                      aria-label="Lưu bài viết"
+                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <Star size={19} className={savedIds.has(post.id) ? 'fill-white text-white' : 'text-white'} />
+                    </button>
+                    <button
+                      onClick={() => sharePost(post)}
+                      aria-label="Chia sẻ bài viết"
+                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <Share2 size={18} className="text-white" />
+                    </button>
+                    <button
+                      onClick={() => handleReact(post, liked ? null : 'love')}
+                      aria-label="Thích bài viết"
+                      className="flex-1 h-12 rounded-full gradient-flame flex items-center justify-center gap-2 focus-ring"
+                    >
+                      <Heart size={19} className={liked ? 'fill-white text-white' : 'text-white'} />
+                      <span className="text-sm font-bold text-white">
+                        {Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
+                      </span>
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-white/50 mt-3">
+                    {new Date(post.created_at).toLocaleDateString('vi-VN')}
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => post.author?.username && navigate(`/profile/${post.author.username}`)}
-                className="text-xs font-semibold bg-black/40 rounded-full px-2.5 py-1 focus-ring"
-              >
-                @{post.author?.username ?? 'unknown'}
-              </button>
-            </div>
-
-            <div className="absolute right-3 bottom-24">
-              <ReactionButton
-                myReaction={post.my_reaction ?? null}
-                count={Object.values(post.reaction_counts ?? {}).reduce((a, b) => a + (b ?? 0), 0)}
-                onReact={(emo) => handleReact(post, emo)}
-              />
-            </div>
-
-            <div className="relative px-4 pb-4 pr-16">
-              {post.caption && <p className="text-sm text-white leading-snug">{post.caption}</p>}
-              <p className="text-[11px] text-white/60 mt-1">
-                {new Date(post.created_at).toLocaleDateString('vi-VN')}
-              </p>
-            </div>
-          </div>
-        ))}
+            )
+          })}
       </div>
 
       {/* New post composer */}
