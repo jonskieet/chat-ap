@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Heart, Star } from 'lucide-react'
+import { ArrowLeft, Heart, Play, Star } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
@@ -118,9 +118,18 @@ export default function SavedPosts() {
               className="relative w-full text-left rounded-2xl overflow-hidden bg-[var(--surface)] min-h-[160px] flex flex-col justify-end focus-ring"
             >
               {post.media_url ? (
-                <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                post.media_type === 'video' ? (
+                  <video src={post.media_url} className="absolute inset-0 w-full h-full object-cover" muted playsInline preload="metadata" />
+                ) : (
+                  <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                )
               ) : (
                 <div className="absolute inset-0 gradient-flame opacity-70" />
+              )}
+              {post.media_type === 'video' && (
+                <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-black/50 flex items-center justify-center">
+                  <Play size={11} className="text-white fill-white ml-0.5" />
+                </div>
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
 

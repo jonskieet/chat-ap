@@ -53,6 +53,7 @@ export interface Post {
   channel_id: string | null
   caption: string | null
   media_url: string | null
+  media_type?: 'image' | 'video' | null
   created_at: string
   author?: Profile
   reaction_counts?: Partial<Record<ReactionEmotion, number>>

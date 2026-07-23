@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Camera, MessageCircle, Pencil, Settings, Star, X } from 'lucide-react'
+import { ArrowLeft, Camera, MessageCircle, Pencil, Play, Settings, Star, X } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
@@ -322,10 +322,19 @@ export default function Profile() {
                   {myPosts.map((p) => (
                     <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden bg-[var(--surface)]">
                       {p.media_url ? (
-                        <img src={p.media_url} className="w-full h-full object-cover" />
+                        p.media_type === 'video' ? (
+                          <video src={p.media_url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={p.media_url} className="w-full h-full object-cover" />
+                        )
                       ) : (
                         <div className="w-full h-full gradient-flame flex items-center justify-center p-2">
                           <p className="text-[10px] leading-snug line-clamp-4">{p.caption}</p>
+                        </div>
+                      )}
+                      {p.media_type === 'video' && (
+                        <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 flex items-center justify-center">
+                          <Play size={10} className="text-white fill-white ml-0.5" />
                         </div>
                       )}
                     </div>

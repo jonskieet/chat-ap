@@ -303,7 +303,7 @@ export default function PostDetail() {
       <div className="flex-1 overflow-y-auto relative">
         {/* Ambient backdrop: phóng to + làm mờ chính ảnh của post, tạo chiều sâu
             phía sau card thay vì nền đơn sắc phẳng lì */}
-        {post?.media_url && !loading && !notFound && (
+        {post?.media_url && post.media_type !== 'video' && !loading && !notFound && (
           <div className="absolute inset-0 overflow-hidden">
             <img
               src={post.media_url}
@@ -344,11 +344,24 @@ export default function PostDetail() {
             <div className="relative w-full rounded-[2.25rem] overflow-hidden border border-white/15 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] bg-[var(--surface)] flex flex-col justify-end aspect-[3/4]">
               <div className="absolute inset-0 cursor-pointer" onClick={handleMediaTap}>
                 {post.media_url ? (
-                  <img
-                    src={post.media_url}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                  />
+                  post.media_type === 'video' ? (
+                    <video
+                      src={post.media_url}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      controls
+                    />
+                  ) : (
+                    <img
+                      src={post.media_url}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                    />
+                  )
                 ) : (
                   <div
                     className="absolute inset-0 gradient-flame opacity-70"
