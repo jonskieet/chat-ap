@@ -141,3 +141,77 @@ h1, h2, h3, .font-display {
     transform: scale(1);
   }
 }
+
+/* Parallax nhẹ cho ảnh nền feed (Home.tsx). transform thực tế được set qua JS
+   (ref.style.transform) theo vị trí cuộn; scale(1.12) mặc định ở đây để tránh
+   lộ viền trống trước khi effect chạy lần đầu. */
+.parallax-media {
+  transform: scale(1.12);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parallax-media {
+    transform: none !important;
+  }
+}
+
+/* Page transition toàn app: slide-in từ phải khi điều hướng sâu hơn (PUSH), slide-in từ
+   trái khi quay lại (POP). Container ngoài overflow-hidden để trang mới trượt vào không
+   tràn ra ngoài khung điện thoại; PhoneShell của từng trang tự lo phần bo góc/border. */
+.page-transition-viewport {
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.page-slide-forward {
+  animation: page-slide-in-right 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.page-slide-back {
+  animation: page-slide-in-left 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes page-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes page-slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-slide-forward,
+  .page-slide-back {
+    animation: none !important;
+  }
+}
+
+/* Shared element transition Home <-> PostDetail (ảnh "bay" theo view-transition-name
+   post-media-{id}). Rút ngắn thời lượng mặc định của trình duyệt (~0.25s) cho khớp nhịp
+   với các animation khác trong app, và tắt hẳn khi người dùng bật prefers-reduced-motion. */
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import { Bell, Heart, MessageSquare, Plus, Share2, Star, X } from 'lucide-react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Bell, Heart, MessageCircle, MessageSquare, Plus, Share2, Star, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import { withViewTransition } from '../lib/viewTransition'
 import type { Post, ReactionEmotion, SavedPost } from '../types'
 
 export default function Home() {
@@ -24,6 +25,9 @@ export default function Home() {
   const [poppingHeart, setPoppingHeart] = useState<string | null>(null)
   const [floatingHeart, setFloatingHeart] = useState<string | null>(null)
   const lastTapRef = useRef<Record<string, number>>({})
+  const tapTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const feedScrollRef = useRef<HTMLDivElement>(null)
+  const parallaxMediaRefs = useRef<Record<string, HTMLElement | null>>({})
 
   async function toggleSaved(postId: string) {
     if (!me) return navigate('/login')
@@ -156,6 +160,13 @@ export default function Home() {
     setUnreadCount(count ?? 0)
   }
 
+  // Dọn timer single-tap khi unmount, tránh gọi navigate() sau khi component đã gỡ
+  useEffect(() => {
+    return () => {
+      Object.values(tapTimerRef.current).forEach((t) => clearTimeout(t))
+    }
+  }, [])
+
   useEffect(() => {
     loadUnreadCount()
     if (!me) return
@@ -233,11 +244,59 @@ export default function Home() {
     }
   }
 
+  function openPost(postId: string) {
+    // View Transitions API: cùng view-transition-name (theo post.id) được đặt trên
+    // ảnh card ở đây và ảnh chính ở PostDetail để trình duyệt tự "morph" giữa 2 vị trí.
+    withViewTransition(() => navigate(`/post/${postId}`))
+  }
+
+  // Parallax nhẹ cho ảnh nền khi cuộn feed: ảnh dịch chậm hơn khung card, tạo chiều sâu.
+  // Dùng requestAnimationFrame để throttle theo scroll, tránh giật trên máy yếu; áp trực
+  // tiếp qua ref.style.transform thay vì setState để không re-render lại cả feed mỗi frame.
+  useEffect(() => {
+    const container = feedScrollRef.current
+    if (!container) return
+
+    let rafId: number | null = null
+
+    function applyParallax() {
+      rafId = null
+      const containerRect = container!.getBoundingClientRect()
+      const containerCenter = containerRect.top + containerRect.height / 2
+      for (const el of Object.values(parallaxMediaRefs.current)) {
+        if (!el) continue
+        const rect = el.getBoundingClientRect()
+        const cardCenter = rect.top + rect.height / 2
+        // Hệ số nhỏ + clamp để hiệu ứng "nhẹ", không gây jank hay lệch quá nhiều
+        const offset = Math.max(-24, Math.min(24, (cardCenter - containerCenter) * 0.08))
+        el.style.transform = `translateY(${offset.toFixed(1)}px) scale(1.12)`
+      }
+    }
+
+    function onScroll() {
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(applyParallax)
+    }
+
+    applyParallax()
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', onScroll)
+      if (rafId !== null) cancelAnimationFrame(rafId)
+    }
+  }, [posts])
+
   function handleMediaTap(post: Post) {
     const now = Date.now()
     const last = lastTapRef.current[post.id] ?? 0
     if (now - last < 300) {
       lastTapRef.current[post.id] = 0
+      // Huỷ điều hướng single-tap đang chờ vì đây là double-tap
+      const pendingTimer = tapTimerRef.current[post.id]
+      if (pendingTimer) {
+        clearTimeout(pendingTimer)
+        delete tapTimerRef.current[post.id]
+      }
       // Double-tap kiểu Instagram: luôn like (không unlike), kèm tim to hiện giữa ảnh rồi fade
       setFloatingHeart(post.id)
       setTimeout(() => setFloatingHeart(null), 700)
@@ -247,6 +306,12 @@ export default function Home() {
       }
     } else {
       lastTapRef.current[post.id] = now
+      // Đợi hết khung double-tap rồi mới điều hướng sang PostDetail, để không mở trang
+      // chi tiết mỗi khi người dùng double-tap để thả tim.
+      tapTimerRef.current[post.id] = setTimeout(() => {
+        delete tapTimerRef.current[post.id]
+        openPost(post.id)
+      }, 300)
     }
   }
 
@@ -340,7 +405,7 @@ export default function Home() {
       </div>
 
       {/* Feed */}
-      <div className="flex-1 overflow-y-auto px-5 pb-32 space-y-5">
+      <div ref={feedScrollRef} className="flex-1 overflow-y-auto px-5 pb-32 space-y-5">
         {loading && (
           <div className="h-80 rounded-3xl bg-[var(--surface)] animate-pulse" />
         )}
@@ -363,11 +428,24 @@ export default function Home() {
             const tags = post.author?.interests?.slice(0, 4) ?? []
             return (
               <div key={post.id} className="relative rounded-3xl overflow-hidden bg-[var(--surface)] min-h-[420px] flex flex-col justify-end">
-                <div className="absolute inset-0 cursor-pointer" onClick={() => handleMediaTap(post)}>
+                <div className="absolute inset-0 cursor-pointer overflow-hidden" onClick={() => handleMediaTap(post)}>
                   {post.media_url ? (
-                    <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                    <img
+                      ref={(el) => {
+                        parallaxMediaRefs.current[post.id] = el
+                      }}
+                      src={post.media_url}
+                      className="parallax-media absolute inset-0 w-full h-full object-cover"
+                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                    />
                   ) : (
-                    <div className="absolute inset-0 gradient-flame opacity-70" />
+                    <div
+                      ref={(el) => {
+                        parallaxMediaRefs.current[post.id] = el
+                      }}
+                      className="parallax-media absolute inset-0 gradient-flame opacity-70"
+                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                    />
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
                 </div>
@@ -434,6 +512,15 @@ export default function Home() {
                       className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
                     >
                       <Share2 size={18} className="text-white" />
+                    </button>
+                    <button
+                      onClick={() =>
+                        withViewTransition(() => navigate(`/post/${post.id}`, { state: { openComments: true } }))
+                      }
+                      aria-label="Bình luận"
+                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <MessageCircle size={18} className="text-white" />
                     </button>
                     <button
                       onClick={() => {

@@ -79,7 +79,16 @@ export interface SavedPost {
   created_at: string
 }
 
-export type NotificationType = 'message' | 'post_reaction' | 'message_reaction'
+export interface PostComment {
+  id: string
+  post_id: string
+  author_id: string
+  content: string
+  created_at: string
+  author?: Profile
+}
+
+export type NotificationType = 'message' | 'post_reaction' | 'message_reaction' | 'post_comment'
 
 export interface AppNotification {
   id: string
@@ -89,6 +98,7 @@ export interface AppNotification {
   channel_id: string | null
   message_id: string | null
   post_id: string | null
+  comment_id: string | null
   emotion: ReactionEmotion | null
   read: boolean
   created_at: string

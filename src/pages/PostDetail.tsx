@@ -1,15 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Heart, Share2, Star, X } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { ArrowLeft, Heart, MessageCircle, Send, Share2, Star, Trash2, X } from 'lucide-react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import type { Post, ReactionEmotion } from '../types'
+import { withViewTransition } from '../lib/viewTransition'
+import type { Post, PostComment, ReactionEmotion } from '../types'
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return 'vừa xong'
+  if (mins < 60) return `${mins} phút trước`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} giờ trước`
+  const days = Math.floor(hours / 24)
+  return `${days} ngày trước`
+}
 
 export default function PostDetail() {
   const { postId } = useParams()
   const navigate = useNavigate()
+  const routerLocation = useLocation()
   const { user, profile: me } = useAuth()
   const { showToast } = useToast()
   const [post, setPost] = useState<Post | null>(null)
@@ -19,6 +32,13 @@ export default function PostDetail() {
   const [poppingHeart, setPoppingHeart] = useState(false)
   const [floatingHeart, setFloatingHeart] = useState(false)
   const lastTapRef = useRef(0)
+
+  const [commentCount, setCommentCount] = useState(0)
+  const [comments, setComments] = useState<PostComment[]>([])
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentsLoading, setCommentsLoading] = useState(false)
+  const [commentInput, setCommentInput] = useState('')
+  const [submittingComment, setSubmittingComment] = useState(false)
 
   async function load() {
     if (!postId) return
@@ -68,10 +88,117 @@ export default function PostDetail() {
     setLoading(false)
   }
 
+  async function loadCommentCount() {
+    if (!postId) return
+    const { count, error } = await supabase
+      .from('post_comments')
+      .select('id', { count: 'exact', head: true })
+      .eq('post_id', postId)
+    if (!error) setCommentCount(count ?? 0)
+  }
+
+  async function loadComments() {
+    if (!postId) return
+    setCommentsLoading(true)
+    const { data, error } = await supabase
+      .from('post_comments')
+      .select('*, author:profiles!post_comments_author_id_fkey(*)')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+    if (error) {
+      console.error(error)
+      showToast('Không tải được bình luận', 'error')
+    } else {
+      setComments((data as unknown as PostComment[]) ?? [])
+    }
+    setCommentsLoading(false)
+  }
+
+  function openComments() {
+    setCommentsOpen(true)
+    if (comments.length === 0) loadComments()
+  }
+
+  // Mở sẵn khung bình luận khi vào từ thông báo "đã bình luận về bài viết của bạn"
   useEffect(() => {
-    load()
+    if ((routerLocation.state as { openComments?: boolean } | null)?.openComments) {
+      openComments()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId])
+
+  async function submitComment() {
+    if (!me || !postId) return navigate('/login')
+    const content = commentInput.trim()
+    if (!content || submittingComment) return
+    setSubmittingComment(true)
+
+    // Optimistic update: chèn ngay vào danh sách, rollback nếu insert lỗi
+    const tempId = `temp-${Date.now()}`
+    const optimisticComment: PostComment = {
+      id: tempId,
+      post_id: postId,
+      author_id: me.id,
+      content,
+      created_at: new Date().toISOString(),
+      author: me,
+    }
+    setComments((prev) => [...prev, optimisticComment])
+    setCommentCount((prev) => prev + 1)
+    setCommentInput('')
+
+    const { data, error } = await supabase
+      .from('post_comments')
+      .insert({ post_id: postId, author_id: me.id, content })
+      .select('*, author:profiles!post_comments_author_id_fkey(*)')
+      .single()
+
+    if (error) {
+      console.error(error)
+      setComments((prev) => prev.filter((c) => c.id !== tempId))
+      setCommentCount((prev) => Math.max(0, prev - 1))
+      setCommentInput(content) // trả lại nội dung để người dùng không phải gõ lại
+      showToast('Không thể gửi bình luận, thử lại nhé', 'error')
+    } else if (data) {
+      setComments((prev) => prev.map((c) => (c.id === tempId ? (data as unknown as PostComment) : c)))
+    }
+    setSubmittingComment(false)
+  }
+
+  async function deleteComment(commentId: string) {
+    const prev = comments
+    setComments((cs) => cs.filter((c) => c.id !== commentId))
+    setCommentCount((n) => Math.max(0, n - 1))
+    const { error } = await supabase.from('post_comments').delete().eq('id', commentId)
+    if (error) {
+      console.error(error)
+      setComments(prev) // rollback
+      setCommentCount((n) => n + 1)
+      showToast('Không thể xoá bình luận, thử lại nhé', 'error')
+    }
+  }
+
+  useEffect(() => {
+    load()
+    loadCommentCount()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postId])
+
+  // Realtime: đồng bộ khung bình luận nếu có người khác bình luận/xoá khi mình đang mở
+  useEffect(() => {
+    if (!postId) return
+    const sub = supabase
+      .channel(`post_comments:${postId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments', filter: `post_id=eq.${postId}` }, () => {
+        loadCommentCount()
+        if (commentsOpen) loadComments()
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(sub)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postId, commentsOpen])
 
   function applyReactionLocally(prevEmotion: ReactionEmotion | null, nextEmotion: ReactionEmotion | null) {
     setPost((prev) => {
@@ -188,7 +315,7 @@ export default function PostDetail() {
         )}
 
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => withViewTransition(() => navigate(-1))}
           aria-label="Quay lại"
           className="absolute top-5 left-5 z-20 w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center focus-ring"
         >
@@ -217,9 +344,16 @@ export default function PostDetail() {
             <div className="relative w-full rounded-[2.25rem] overflow-hidden border border-white/15 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] bg-[var(--surface)] flex flex-col justify-end aspect-[3/4]">
               <div className="absolute inset-0 cursor-pointer" onClick={handleMediaTap}>
                 {post.media_url ? (
-                  <img src={post.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                  <img
+                    src={post.media_url}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                  />
                 ) : (
-                  <div className="absolute inset-0 gradient-flame opacity-70" />
+                  <div
+                    className="absolute inset-0 gradient-flame opacity-70"
+                    style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
+                  />
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
               </div>
@@ -287,6 +421,18 @@ export default function PostDetail() {
                     <Share2 size={18} className="text-white" />
                   </button>
                   <button
+                    onClick={openComments}
+                    aria-label="Bình luận"
+                    className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center gap-1 focus-ring relative"
+                  >
+                    <MessageCircle size={18} className="text-white" />
+                    {commentCount > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center">
+                        {commentCount > 99 ? '99+' : commentCount}
+                      </span>
+                    )}
+                  </button>
+                  <button
                     onClick={() => {
                       handleReact(post.my_reaction === 'love' ? null : 'love')
                       triggerHeartPop()
@@ -313,6 +459,94 @@ export default function PostDetail() {
           )}
         </div>
       </div>
+
+      {commentsOpen && (
+        <div
+          className="absolute inset-0 z-30 bg-black/70 flex items-end"
+          onClick={() => setCommentsOpen(false)}
+        >
+          <div
+            className="w-full h-[75%] bg-[var(--surface)] rounded-t-3xl border-t border-[var(--border)] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+              <h2 className="font-display font-bold text-lg">
+                Bình luận {commentCount > 0 && <span className="text-[var(--text-dim)] font-normal">({commentCount})</span>}
+              </h2>
+              <button onClick={() => setCommentsOpen(false)} className="p-1 focus-ring rounded-full" aria-label="Đóng">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 space-y-4 pb-3">
+              {commentsLoading && (
+                <>
+                  <div className="h-12 rounded-2xl skeleton-glass" />
+                  <div className="h-12 rounded-2xl skeleton-glass" />
+                </>
+              )}
+              {!commentsLoading && comments.length === 0 && (
+                <p className="text-sm text-[var(--text-dim)] text-center py-8">
+                  Chưa có bình luận nào. Hãy là người đầu tiên!
+                </p>
+              )}
+              {!commentsLoading &&
+                comments.map((c) => (
+                  <div key={c.id} className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-[var(--surface-2)] border border-[var(--border)] overflow-hidden flex items-center justify-center text-xs font-semibold">
+                      {c.author?.avatar_url ? (
+                        <img src={c.author.avatar_url} className="w-full h-full object-cover" />
+                      ) : (
+                        c.author?.username?.slice(0, 1).toUpperCase()
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold">
+                        {c.author?.display_name ?? c.author?.username ?? 'unknown'}
+                        <span className="text-[var(--text-dim)] font-normal ml-2">{timeAgo(c.created_at)}</span>
+                      </p>
+                      <p className="text-sm mt-0.5 break-words">{c.content}</p>
+                    </div>
+                    {c.author_id === me?.id && (
+                      <button
+                        onClick={() => deleteComment(c.id)}
+                        aria-label="Xoá bình luận"
+                        className="p-1.5 shrink-0 rounded-full text-[var(--text-dim)] hover:text-red-400 focus-ring"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+            </div>
+
+            <div className="flex items-center gap-2 px-5 py-3.5 border-t border-[var(--border)] shrink-0">
+              <input
+                value={commentInput}
+                onChange={(e) => setCommentInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    submitComment()
+                  }
+                }}
+                placeholder={me ? 'Viết bình luận...' : 'Đăng nhập để bình luận'}
+                maxLength={500}
+                disabled={!me}
+                className="flex-1 bg-[var(--surface-2)] border border-[var(--border)] rounded-full px-4 py-2.5 text-sm outline-none focus-ring disabled:opacity-60"
+              />
+              <button
+                onClick={() => (me ? submitComment() : navigate('/login'))}
+                disabled={me ? !commentInput.trim() || submittingComment : false}
+                aria-label="Gửi bình luận"
+                className="w-10 h-10 shrink-0 rounded-full gradient-nova text-black flex items-center justify-center focus-ring disabled:opacity-50"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PhoneShell>
   )
 }

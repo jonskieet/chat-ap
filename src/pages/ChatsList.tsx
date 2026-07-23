@@ -20,6 +20,8 @@ export default function ChatsList() {
   const [suggested, setSuggested] = useState<Profile[]>([])
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newTopic, setNewTopic] = useState('')
@@ -149,20 +151,67 @@ export default function ChatsList() {
   }
 
   const filteredChats = useMemo(() => {
-    if (activeTab === 'Personal') return chats.filter((c) => c.is_dm)
-    if (activeTab === 'Groups') return chats.filter((c) => c.is_group)
-    if (activeTab === 'Unanswered') return chats.filter((c) => c.unread_count > 0)
-    return chats
-  }, [chats, activeTab])
+    let list = chats
+    if (activeTab === 'Personal') list = list.filter((c) => c.is_dm)
+    else if (activeTab === 'Groups') list = list.filter((c) => c.is_group)
+    else if (activeTab === 'Unanswered') list = list.filter((c) => c.unread_count > 0)
+
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return list
+    // Lọc theo tên hiển thị / username của người còn lại (DM) hoặc tên nhóm — client-side,
+    // vì ChatsList đã load đủ dữ liệu chats trong state, không cần query mới.
+    return list.filter((c) => {
+      const name = c.is_dm ? c.other_display_name ?? '' : c.name ?? ''
+      const username = c.is_dm ? c.other_username ?? '' : ''
+      return name.toLowerCase().includes(q) || username.toLowerCase().includes(q)
+    })
+  }, [chats, activeTab, searchQuery])
+
+  const filteredSuggested = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return suggested
+    return suggested.filter(
+      (p) =>
+        p.username.toLowerCase().includes(q) ||
+        (p.display_name ?? '').toLowerCase().includes(q)
+    )
+  }, [suggested, searchQuery])
+
+  function openSearch() {
+    setSearchOpen(true)
+  }
+
+  function closeSearch() {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }
 
   return (
     <PhoneShell>
       <div className="flex-1 overflow-y-auto px-5 pt-6 pb-32">
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="font-display text-3xl font-bold">Chats</h1>
-          <button className="p-2 rounded-full bg-[var(--surface)] focus-ring" aria-label="Tìm kiếm">
-            <Search size={18} />
-          </button>
+        <div className="flex items-center justify-between mb-5 gap-3">
+          {searchOpen ? (
+            <div className="flex-1 flex items-center gap-2 bg-[var(--surface)] border border-[var(--border)] rounded-full px-4 py-2.5">
+              <Search size={16} className="text-[var(--text-dim)] shrink-0" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm cuộc trò chuyện, người dùng..."
+                className="flex-1 bg-transparent outline-none text-sm min-w-0"
+              />
+              <button onClick={closeSearch} className="p-0.5 focus-ring rounded-full shrink-0" aria-label="Đóng tìm kiếm">
+                <X size={16} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <h1 className="font-display text-3xl font-bold">Chats</h1>
+              <button onClick={openSearch} className="p-2 rounded-full bg-[var(--surface)] focus-ring" aria-label="Tìm kiếm">
+                <Search size={18} />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-5 mb-6 text-sm">
@@ -189,12 +238,14 @@ export default function ChatsList() {
             ))}
           {!loading && filteredChats.length === 0 && (
             <p className="text-sm text-[var(--text-dim)]">
-              {user
-                ? 'Chưa có cuộc trò chuyện nào. Nhắn ai đó ở mục People bên dưới!'
-                : 'Đăng nhập để xem cuộc trò chuyện của bạn.'}
+              {searchQuery.trim()
+                ? 'Không tìm thấy cuộc trò chuyện phù hợp.'
+                : user
+                  ? 'Chưa có cuộc trò chuyện nào. Nhắn ai đó ở mục People bên dưới!'
+                  : 'Đăng nhập để xem cuộc trò chuyện của bạn.'}
             </p>
           )}
-          {filteredChats.slice(0, 8).map((c) => {
+          {filteredChats.slice(0, searchQuery.trim() ? filteredChats.length : 8).map((c) => {
             const label = c.is_dm ? c.other_display_name ?? c.other_username ?? 'Direct message' : c.name
             const avatarUrl = c.is_dm ? c.other_avatar_url : c.cover_url
             return (
@@ -227,7 +278,7 @@ export default function ChatsList() {
 
         {/* Chat previews with last message */}
         <div className="flex flex-col gap-1 mb-7">
-          {filteredChats.slice(0, 6).map((c) => {
+          {filteredChats.slice(0, searchQuery.trim() ? filteredChats.length : 6).map((c) => {
             const label = c.is_dm ? c.other_display_name ?? c.other_username ?? 'Direct message' : c.name
             return (
               <button
@@ -255,10 +306,12 @@ export default function ChatsList() {
           <h2 className="font-display font-bold text-lg mb-0.5">People</h2>
           <p className="text-xs text-[var(--text-dim)] mb-3">Friends' recommendations</p>
           <div className="flex gap-3 overflow-x-auto -mx-1 px-1">
-            {suggested.length === 0 && !loading && (
-              <p className="text-xs text-[var(--text-dim)]">Chưa có gợi ý nào.</p>
+            {filteredSuggested.length === 0 && !loading && (
+              <p className="text-xs text-[var(--text-dim)]">
+                {searchQuery.trim() ? 'Không tìm thấy người dùng phù hợp.' : 'Chưa có gợi ý nào.'}
+              </p>
             )}
-            {suggested.map((p, i) => (
+            {filteredSuggested.map((p, i) => (
               <div
                 key={p.id}
                 className={`relative shrink-0 w-40 h-52 rounded-2xl overflow-hidden p-3 flex flex-col justify-between ${

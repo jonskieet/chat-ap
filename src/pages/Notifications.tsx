@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useState } from 'react'
-import { ArrowLeft, Flame, Heart, MessageSquare, Smile } from 'lucide-react'
+import { ArrowLeft, Flame, Heart, MessageCircle, MessageSquare, Smile } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import { supabase } from '../lib/supabaseClient'
@@ -20,12 +20,14 @@ function describe(n: AppNotification): string {
   const who = n.actor?.display_name || (n.actor?.username ? `@${n.actor.username}` : 'Ai đó')
   if (n.type === 'message') return `${who} đã gửi cho bạn một tin nhắn mới`
   if (n.type === 'post_reaction') return `${who} đã bày tỏ cảm xúc ${n.emotion ? REACTION_EMOJI[n.emotion] : ''} với bài viết của bạn`
+  if (n.type === 'post_comment') return `${who} đã bình luận về bài viết của bạn`
   return `${who} đã thả cảm xúc ${n.emotion ? REACTION_EMOJI[n.emotion] : ''} cho tin nhắn của bạn`
 }
 
 function iconFor(type: AppNotification['type']) {
   if (type === 'message') return MessageSquare
   if (type === 'post_reaction') return Heart
+  if (type === 'post_comment') return MessageCircle
   return Smile
 }
 
@@ -79,6 +81,8 @@ export default function Notifications() {
       navigate(`/chats/${n.channel_id}`)
     } else if (n.type === 'post_reaction' && n.post_id) {
       navigate(`/post/${n.post_id}`)
+    } else if (n.type === 'post_comment' && n.post_id) {
+      navigate(`/post/${n.post_id}`, { state: { openComments: true } })
     } else if (n.type === 'message_reaction' && n.channel_id) {
       navigate(`/chats/${n.channel_id}`)
     }
