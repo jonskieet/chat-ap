@@ -51,3 +51,33 @@ h1, h2, h3, .font-display {
   outline: 2px solid var(--accent-nova-2);
   outline-offset: 2px;
 }
+
+/* Glass shimmer skeleton: nền mờ kính + ánh sáng lướt qua */
+.skeleton-glass {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.skeleton-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.16) 50%,
+    transparent 80%
+  );
+  animation: skeleton-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-sheen {
+  100% {
+    transform: translateX(100%);
+  }
+}

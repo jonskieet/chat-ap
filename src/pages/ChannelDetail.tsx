@@ -214,7 +214,7 @@ export default function ChannelDetail() {
             <ArrowLeft size={18} />
           </button>
           <div className="flex items-center gap-2 bg-black/40 rounded-full pl-1 pr-3 py-1">
-            <div className="relative w-7 h-7 rounded-full bg-[var(--surface)] overflow-hidden shrink-0">
+            <div className="relative w-7 h-7 rounded-full bg-[var(--surface)] overflow-hidden shrink-0 skeleton-glass">
               {(channel?.is_dm ? otherUser?.avatar_url : channel?.cover_url) && (
                 <img
                   src={channel?.is_dm ? otherUser?.avatar_url ?? '' : channel?.cover_url ?? ''}
@@ -226,15 +226,23 @@ export default function ChannelDetail() {
                 <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-500 border border-black" />
               )}
             </div>
-            <span className="text-sm font-medium">
-              {channel?.is_dm ? otherUser?.display_name ?? otherUser?.username ?? 'Đang tải...' : profile?.display_name ?? 'Bạn'}
-            </span>
+            {channel ? (
+              <span className="text-sm font-medium">
+                {channel.is_dm ? otherUser?.display_name ?? otherUser?.username ?? 'Đang tải...' : profile?.display_name ?? 'Bạn'}
+              </span>
+            ) : (
+              <span className="h-4 w-16 rounded skeleton-glass inline-block" />
+            )}
           </div>
         </div>
         <div className="relative px-5 mt-4 flex items-center gap-3 text-xs">
-          <span className="bg-black rounded-full px-3 py-1 font-semibold">
-            {channel?.is_dm ? `@${otherUser?.username ?? '...'}` : `#${channel?.name ?? 'kenh'}`}
-          </span>
+          {channel ? (
+            <span className="bg-black rounded-full px-3 py-1 font-semibold">
+              {channel.is_dm ? `@${otherUser?.username ?? '...'}` : `#${channel.name ?? 'kenh'}`}
+            </span>
+          ) : (
+            <span className="h-6 w-16 rounded-full skeleton-glass inline-block" />
+          )}
           <span className="flex items-center gap-1 text-white/80">
             <MessageCircle size={13} /> {messages.length}
           </span>
@@ -243,9 +251,9 @@ export default function ChannelDetail() {
           </span>
         </div>
         {!channel ? (
-          <div className="relative px-5 mt-4 space-y-2 animate-pulse">
-            <div className="h-6 w-2/3 rounded bg-white/20" />
-            <div className="h-6 w-1/3 rounded bg-white/10" />
+          <div className="relative px-5 mt-4 space-y-2">
+            <div className="h-6 w-2/3 rounded-lg skeleton-glass" />
+            <div className="h-6 w-1/3 rounded-lg skeleton-glass" />
           </div>
         ) : channel.is_dm ? (
           otherUser?.bio && (
@@ -259,9 +267,12 @@ export default function ChannelDetail() {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messagesLoading ? (
           <>
-            {[0, 1, 2].map((i) => (
-              <div key={i} className={`flex ${i % 2 ? 'justify-end' : 'justify-start'} animate-pulse`}>
-                <div className="h-9 w-40 rounded-2xl bg-[var(--surface)]" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className={`flex ${i % 2 ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className="h-9 rounded-2xl skeleton-glass"
+                  style={{ width: `${120 + (i % 3) * 30}px` }}
+                />
               </div>
             ))}
           </>
