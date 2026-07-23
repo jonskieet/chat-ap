@@ -19,6 +19,7 @@ export default function Home() {
   const [caption, setCaption] = useState('')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [posting, setPosting] = useState(false)
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const [unreadCount, setUnreadCount] = useState(0)
   const [poppingHeart, setPoppingHeart] = useState<string | null>(null)
@@ -491,6 +492,13 @@ export default function Home() {
 
                   {/* Action panel: đóng / lưu / chia sẻ / thích */}
                   <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setHiddenIds((prev) => new Set(prev).add(post.id))}
+                      aria-label="Ẩn bài viết"
+                      className="w-12 h-12 shrink-0 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center focus-ring"
+                    >
+                      <X size={20} className="text-white" />
+                    </button>
                     <button
                       onClick={() => toggleSaved(post.id)}
                       aria-label="Lưu bài viết"
