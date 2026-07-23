@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Heart, MessageCircle, Send, Share2, Star, Trash2, X } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
+import MediaCarousel from '../components/MediaCarousel'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -47,7 +48,7 @@ export default function PostDetail() {
 
     const { data, error } = await supabase
       .from('posts')
-      .select('*, author:profiles!posts_author_id_fkey(*)')
+      .select('*, author:profiles!posts_author_id_fkey(*), media:post_media(*)')
       .eq('id', postId)
       .maybeSingle()
 
@@ -60,6 +61,7 @@ export default function PostDetail() {
       setLoading(false)
       return
     }
+    ;(data as unknown as Post).media = [...((data as unknown as Post).media ?? [])].sort((a, b) => a.position - b.position)
 
     const { data: reactions } = await supabase
       .from('post_reactions')
@@ -342,34 +344,18 @@ export default function PostDetail() {
             // Card bo tròn nổi khối — viền sáng mảnh + bóng đổ sâu để tách hẳn
             // khỏi phông nền mờ phía sau, thay vì tràn kín màn hình như trước.
             <div className="relative w-full rounded-[2.25rem] overflow-hidden border border-white/15 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] bg-[var(--surface)] flex flex-col justify-end aspect-[3/4]">
-              <div className="absolute inset-0 cursor-pointer" onClick={handleMediaTap}>
-                {post.media_url ? (
-                  post.media_type === 'video' ? (
-                    <video
-                      src={post.media_url}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      controls
-                    />
-                  ) : (
-                    <img
-                      src={post.media_url}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                    />
-                  )
-                ) : (
-                  <div
-                    className="absolute inset-0 gradient-flame opacity-70"
-                    style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                  />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
-              </div>
+              <MediaCarousel
+                media={
+                  post.media && post.media.length > 0
+                    ? post.media
+                    : post.media_url
+                      ? [{ id: post.id, post_id: post.id, media_url: post.media_url, media_type: post.media_type ?? 'image', position: 0 }]
+                      : []
+                }
+                postId={post.id}
+                onTap={handleMediaTap}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent pointer-events-none" />
 
               {floatingHeart && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

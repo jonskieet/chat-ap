@@ -47,6 +47,14 @@ export interface FollowStats {
 
 export type ReactionEmotion = 'love' | 'fire' | 'haha' | 'wow' | 'sad'
 
+export interface PostMedia {
+  id: string
+  post_id: string
+  media_url: string
+  media_type: 'image' | 'video'
+  position: number
+}
+
 export interface Post {
   id: string
   author_id: string
@@ -58,6 +66,33 @@ export interface Post {
   author?: Profile
   reaction_counts?: Partial<Record<ReactionEmotion, number>>
   my_reaction?: ReactionEmotion | null
+  /** Toàn bộ ảnh/video của post này (carousel nhiều ảnh), sắp theo `position`. */
+  media?: PostMedia[]
+}
+
+// Tin (Story) 24h — hoàn toàn tách khỏi bảng posts/feed.
+export interface Story {
+  id: string
+  author_id: string
+  media_url: string
+  media_type: 'image' | 'video'
+  caption: string | null
+  created_at: string
+  expires_at: string
+  author?: Profile
+}
+
+export interface StoryView {
+  story_id: string
+  viewer_id: string
+  viewed_at: string
+}
+
+export interface StoryGroup {
+  authorId: string
+  author?: Profile
+  stories: Story[]
+  allViewed: boolean
 }
 
 export interface PostReaction {

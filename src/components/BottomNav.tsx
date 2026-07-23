@@ -1,6 +1,7 @@
 import { MessageCircle, Plus, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useComposer } from '../context/ComposerContext'
 
 function HomeIcon({ size = 20 }: { size?: number }) {
   return (
@@ -21,7 +22,8 @@ function HomeIcon({ size = 20 }: { size?: number }) {
 
 export default function BottomNav() {
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
+  const { openPostComposer } = useComposer()
   return (
     <div className="absolute bottom-0 left-0 right-0 px-5 pb-6 pt-3 bg-gradient-to-t from-[var(--bg)] via-[var(--bg)]/95 to-transparent">
       <div className="flex items-center justify-between">
@@ -43,8 +45,9 @@ export default function BottomNav() {
         </button>
 
         <button
+          onClick={() => (user ? openPostComposer() : navigate('/login'))}
           className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center focus-ring shadow-lg"
-          aria-label="Tạo mới"
+          aria-label="Đăng bài mới"
         >
           <Plus size={20} />
         </button>

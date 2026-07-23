@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Bell, Heart, MessageCircle, MessageSquare, Plus, Share2, Star, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Bell, Heart, MessageCircle, MessageSquare, Share2, Star, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
-import StoryViewer from '../components/StoryViewer'
+import StoryBar from '../components/StoryBar'
+import MediaCarousel from '../components/MediaCarousel'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import { useComposer } from '../context/ComposerContext'
 import { withViewTransition } from '../lib/viewTransition'
 import type { Post, ReactionEmotion, SavedPost } from '../types'
 
@@ -14,57 +16,23 @@ export default function Home() {
   const navigate = useNavigate()
   const { user, profile: me } = useAuth()
   const { showToast } = useToast()
+  const { openPostComposer } = useComposer()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [composerOpen, setComposerOpen] = useState(false)
-  const [caption, setCaption] = useState('')
-  const [mediaFile, setMediaFile] = useState<File | null>(null)
-  const mediaKind: 'image' | 'video' | null = mediaFile ? (mediaFile.type.startsWith('video/') ? 'video' : 'image') : null
-  const [posting, setPosting] = useState(false)
-  const [hiddenAuthorIds, setHiddenAuthorIds] = useState<Set<string>>(new Set())
+  const [hiddenPostIds, setHiddenPostIds] = useState<Set<string>>(new Set())
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const [unreadCount, setUnreadCount] = useState(0)
   const [poppingHeart, setPoppingHeart] = useState<string | null>(null)
   const [floatingHeart, setFloatingHeart] = useState<string | null>(null)
-  const [storyViewerAuthorId, setStoryViewerAuthorId] = useState<string | null>(null)
-  const [storyViewerIndex, setStoryViewerIndex] = useState(0)
   const lastTapRef = useRef<Record<string, number>>({})
   const tapTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const feedScrollRef = useRef<HTMLDivElement>(null)
   const parallaxMediaRefs = useRef<Record<string, HTMLElement | null>>({})
   const postsRef = useRef<Post[]>([])
 
-  // Gộp các bài viết theo tác giả (giữ nguyên thứ tự mới nhất trước, vì `posts` đã
-  // được sắp xếp theo created_at desc — lần xuất hiện đầu tiên của mỗi tác giả trong
-  // vòng lặp chính là bài mới nhất của họ) để hiển thị 1 card/avatar duy nhất mỗi người
-  // thay vì lặp lại nhiều lần như Instagram Stories.
-  const authorGroups = useMemo(() => {
-    const order: string[] = []
-    const map = new Map<string, Post[]>()
-    for (const p of posts) {
-      if (!map.has(p.author_id)) {
-        map.set(p.author_id, [])
-        order.push(p.author_id)
-      }
-      map.get(p.author_id)!.push(p)
-    }
-    return order.map((authorId) => ({ authorId, posts: map.get(authorId)! }))
-  }, [posts])
-
-  const activeStoryPosts = useMemo(
-    () => (storyViewerAuthorId ? posts.filter((p) => p.author_id === storyViewerAuthorId) : []),
-    [posts, storyViewerAuthorId]
-  )
-
-  function openStoryViewer(authorId: string, index = 0) {
-    setStoryViewerAuthorId(authorId)
-    setStoryViewerIndex(index)
-  }
-
   async function toggleSaved(postId: string) {
     if (!me) return navigate('/login')
     const alreadySaved = savedIds.has(postId)
-    // optimistic update
     setSavedIds((prev) => {
       const next = new Set(prev)
       alreadySaved ? next.delete(postId) : next.add(postId)
@@ -74,7 +42,7 @@ export default function Home() {
       const { error } = await supabase.from('saved_posts').delete().eq('post_id', postId).eq('user_id', me.id)
       if (error) {
         console.error(error)
-        setSavedIds((prev) => new Set(prev).add(postId)) // rollback
+        setSavedIds((prev) => new Set(prev).add(postId))
         showToast('Không thể bỏ lưu bài viết, thử lại nhé', 'error')
       } else {
         showToast('Đã bỏ lưu bài viết', 'success')
@@ -84,7 +52,7 @@ export default function Home() {
       if (error) {
         console.error(error)
         setSavedIds((prev) => {
-          const next = new Set(prev) // rollback
+          const next = new Set(prev)
           next.delete(postId)
           return next
         })
@@ -115,12 +83,10 @@ export default function Home() {
   }
 
   async function loadPosts(silent = false) {
-    // silent=true: dùng cho refresh nền (realtime), không hiện skeleton để tránh
-    // toàn bộ feed bị unmount/remount gây giật/nhảy ảnh khi đang cuộn hoặc vừa bấm tim
     if (!silent) setLoading(true)
     const { data: postsData, error } = await supabase
       .from('posts')
-      .select('*, author:profiles!posts_author_id_fkey(*)')
+      .select('*, author:profiles!posts_author_id_fkey(*), media:post_media(*)')
       .order('created_at', { ascending: false })
       .limit(20)
 
@@ -131,11 +97,13 @@ export default function Home() {
       return
     }
 
-    const list = (postsData as unknown as Post[]) ?? []
+    const list = ((postsData as unknown as Post[]) ?? []).map((p) => ({
+      ...p,
+      media: [...(p.media ?? [])].sort((a, b) => a.position - b.position),
+    }))
     const uid = user?.id
     const ids = list.map((p) => p.id)
 
-    // 1 query duy nhất cho toàn bộ post_reactions thay vì loop N+1 như trước
     let reactionsByPost: Record<string, { user_id: string; emotion: ReactionEmotion }[]> = {}
     if (ids.length) {
       const { data: allReactions } = await supabase
@@ -164,8 +132,6 @@ export default function Home() {
     if (!silent) setLoading(false)
   }
 
-  // Refresh nhẹ chỉ số lượt tim cho các post đang hiển thị, không đụng tới danh sách
-  // post/loading — dùng khi có người khác thả tim, tránh phải load lại (và nhảy) cả feed.
   async function refreshReactionCounts(postIds: string[]) {
     if (!postIds.length) return
     const uid = user?.id
@@ -228,9 +194,6 @@ export default function Home() {
     setUnreadCount(count ?? 0)
   }
 
-  // Dọn timer single-tap khi unmount, tránh gọi navigate() sau khi component đã gỡ
-  // Giữ ref đồng bộ với posts để đọc trong subscription realtime mà không cần
-  // đưa `posts` vào dependency array (tránh subscribe lại kênh mỗi lần feed đổi)
   useEffect(() => {
     postsRef.current = posts
   }, [posts])
@@ -265,8 +228,6 @@ export default function Home() {
     const sub = supabase
       .channel('post_reactions_live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions' }, (payload) => {
-        // Bỏ qua nếu chính là hành động của mình: đã cập nhật optimistic ngay khi bấm,
-        // gọi lại refresh ở đây chỉ tổ dư thừa (và có thể gây nhấp nháy do race condition).
         const row = (payload.new ?? payload.old) as { user_id?: string } | null
         if (row?.user_id && row.user_id === me?.id) return
         refreshReactionCounts(postsRef.current.map((p) => p.id))
@@ -297,8 +258,6 @@ export default function Home() {
   async function handleReact(post: Post, emotion: ReactionEmotion | null) {
     if (!me) return
     const prevEmotion = post.my_reaction ?? null
-
-    // Optimistic update: cập nhật UI ngay, không đợi round-trip DB rồi loadPosts() lại toàn bộ feed
     applyReactionLocally(post.id, prevEmotion, emotion)
 
     let error = null
@@ -316,18 +275,12 @@ export default function Home() {
 
     if (error) {
       console.error(error)
-      // rollback nếu request thất bại
       applyReactionLocally(post.id, emotion, prevEmotion)
       showToast('Không thể gửi cảm xúc, thử lại nhé', 'error')
     }
   }
 
-  // (đã chuyển sang openStoryViewer ở trên; tap ảnh giờ mở story-viewer gộp theo tác giả
-  // thay vì điều hướng thẳng sang PostDetail)
-
-  // Parallax nhẹ cho ảnh nền khi cuộn feed: ảnh dịch chậm hơn khung card, tạo chiều sâu.
-  // Dùng requestAnimationFrame để throttle theo scroll, tránh giật trên máy yếu; áp trực
-  // tiếp qua ref.style.transform thay vì setState để không re-render lại cả feed mỗi frame.
+  // Parallax nhẹ cho ảnh nền khi cuộn feed
   useEffect(() => {
     const container = feedScrollRef.current
     if (!container) return
@@ -342,7 +295,6 @@ export default function Home() {
         if (!el) continue
         const rect = el.getBoundingClientRect()
         const cardCenter = rect.top + rect.height / 2
-        // Hệ số nhỏ + clamp để hiệu ứng "nhẹ", không gây jank hay lệch quá nhiều
         const offset = Math.max(-24, Math.min(24, (cardCenter - containerCenter) * 0.08))
         el.style.transform = `translateY(${offset.toFixed(1)}px) scale(1.12)`
       }
@@ -361,18 +313,17 @@ export default function Home() {
     }
   }, [posts])
 
+  // Single-tap: mở chi tiết bài viết. Double-tap: thả tim kiểu Instagram.
   function handleMediaTap(post: Post) {
     const now = Date.now()
     const last = lastTapRef.current[post.id] ?? 0
     if (now - last < 300) {
       lastTapRef.current[post.id] = 0
-      // Huỷ điều hướng single-tap đang chờ vì đây là double-tap
       const pendingTimer = tapTimerRef.current[post.id]
       if (pendingTimer) {
         clearTimeout(pendingTimer)
         delete tapTimerRef.current[post.id]
       }
-      // Double-tap kiểu Instagram: luôn like (không unlike), kèm tim to hiện giữa ảnh rồi fade
       setFloatingHeart(post.id)
       setTimeout(() => setFloatingHeart(null), 700)
       if (post.my_reaction !== 'love') {
@@ -381,11 +332,9 @@ export default function Home() {
       }
     } else {
       lastTapRef.current[post.id] = now
-      // Đợi hết khung double-tap rồi mới mở StoryViewer, để không mở mỗi khi
-      // người dùng double-tap để thả tim.
       tapTimerRef.current[post.id] = setTimeout(() => {
         delete tapTimerRef.current[post.id]
-        openStoryViewer(post.author_id, 0)
+        withViewTransition(() => navigate(`/post/${post.id}`))
       }, 300)
     }
   }
@@ -393,38 +342,6 @@ export default function Home() {
   function triggerHeartPop(postId: string) {
     setPoppingHeart(postId)
     setTimeout(() => setPoppingHeart(null), 280)
-  }
-
-  async function submitPost() {
-    if (!me || (!caption.trim() && !mediaFile)) return
-    setPosting(true)
-    try {
-      let mediaUrl: string | null = null
-      if (mediaFile) {
-        const path = `${me.id}/${Date.now()}-${mediaFile.name}`
-        const { error: uploadError } = await supabase.storage.from('posts').upload(path, mediaFile)
-        if (uploadError) throw uploadError
-        const { data: pub } = supabase.storage.from('posts').getPublicUrl(path)
-        mediaUrl = pub.publicUrl
-      }
-      const { error } = await supabase.from('posts').insert({
-        author_id: me.id,
-        caption: caption.trim() || null,
-        media_url: mediaUrl,
-        media_type: mediaUrl ? mediaKind : null,
-      })
-      if (error) throw error
-      setCaption('')
-      setMediaFile(null)
-      setComposerOpen(false)
-      showToast('Đã đăng bài viết', 'success')
-      loadPosts()
-    } catch (e) {
-      console.error(e)
-      showToast('Đăng bài thất bại, thử lại nhé', 'error')
-    } finally {
-      setPosting(false)
-    }
   }
 
   return (
@@ -454,115 +371,44 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Story row */}
-      <div className="flex gap-3 overflow-x-auto px-5 pb-4 shrink-0">
-        <button onClick={() => setComposerOpen(true)} className="flex flex-col items-center gap-1.5 shrink-0 focus-ring rounded-2xl" aria-label="Đăng bài mới">
-          <div className="w-14 h-14 rounded-full border-2 border-dashed border-[var(--text-dim)] flex items-center justify-center">
-            <Plus size={18} className="text-[var(--text-dim)]" />
-          </div>
-          <span className="text-[11px] text-[var(--text-dim)]">Của bạn</span>
-        </button>
-        {authorGroups.slice(0, 6).map(({ authorId, posts: authorPosts }) => {
-          const cover = authorPosts[0]
-          return (
-            <button
-              key={authorId}
-              onClick={() => openStoryViewer(authorId, 0)}
-              className="flex flex-col items-center gap-1.5 shrink-0 focus-ring rounded-2xl"
-            >
-              <div className="relative w-14 h-14 rounded-full story-ring p-[2px]">
-                <div className="w-full h-full rounded-full bg-[var(--surface)] border-2 border-[var(--bg)] overflow-hidden flex items-center justify-center text-sm font-semibold">
-                  {cover.author?.avatar_url ? (
-                    <img src={cover.author.avatar_url} className="w-full h-full object-cover" />
-                  ) : (
-                    cover.author?.username?.slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                {authorPosts.length > 1 && (
-                  <span className="absolute -bottom-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 rounded-full bg-[#ff4f9a] border-2 border-[var(--bg)] text-white text-[9px] font-bold flex items-center justify-center">
-                    {authorPosts.length}
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] text-[var(--text-dim)] max-w-[56px] truncate">
-                {cover.author?.username ?? '...'}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      {/* Story row — tách hoàn toàn khỏi feed bài viết, tự quản lý dữ liệu/viewer riêng */}
+      <StoryBar />
 
-      {/* Feed */}
+      {/* Feed: mỗi bài viết 1 card riêng (không gộp nhiều post lại nữa); ảnh nhiều tấm trong
+          cùng 1 post thì vuốt ngang xem trong MediaCarousel. */}
       <div ref={feedScrollRef} className="flex-1 overflow-y-auto px-5 pb-32 space-y-5">
-        {loading && (
-          <div className="h-80 rounded-3xl bg-[var(--surface)] animate-pulse" />
-        )}
-        {!loading && authorGroups.length === 0 && (
+        {loading && <div className="h-80 rounded-3xl bg-[var(--surface)] animate-pulse" />}
+        {!loading && posts.length === 0 && (
           <div className="text-center py-16">
             <p className="font-display font-bold text-lg mb-1">Chưa có bài viết nào</p>
             <p className="text-sm text-[var(--text-dim)] mb-4">Hãy là người đầu tiên chia sẻ điều gì đó.</p>
-            <button
-              onClick={() => setComposerOpen(true)}
-              className="gradient-nova text-black font-bold rounded-full px-6 py-2.5 focus-ring"
-            >
+            <button onClick={openPostComposer} className="gradient-nova text-black font-bold rounded-full px-6 py-2.5 focus-ring">
               Đăng bài
             </button>
           </div>
         )}
-        {authorGroups
-          .filter((g) => !hiddenAuthorIds.has(g.authorId))
-          .map(({ authorId, posts: authorPosts }) => {
-            const post = authorPosts[0]
+        {posts
+          .filter((p) => !hiddenPostIds.has(p.id))
+          .map((post) => {
             const liked = post.my_reaction === 'love'
             const tags = post.author?.interests?.slice(0, 4) ?? []
-            const stackCount = authorPosts.length
-            const isVideo = post.media_type === 'video'
+            const media = post.media && post.media.length > 0
+              ? post.media
+              : post.media_url
+                ? [{ id: post.id, post_id: post.id, media_url: post.media_url, media_type: post.media_type ?? 'image', position: 0 }]
+                : []
             return (
-              <div key={authorId} className="relative">
-                {/* Hiệu ứng stack: 2 lớp viền mờ phía sau, hé ra ở 2 bên để gợi ý còn nhiều bài */}
-                {stackCount > 1 && (
-                  <>
-                    <div className="absolute inset-x-3 -bottom-2 h-full rounded-3xl bg-[var(--surface)]/70 -z-10" />
-                    <div className="absolute inset-x-1.5 -bottom-1 h-full rounded-3xl bg-[var(--surface)]/90 -z-10" />
-                  </>
-                )}
+              <div key={post.id} className="relative">
                 <div className="relative rounded-3xl overflow-hidden bg-[var(--surface)] min-h-[420px] flex flex-col justify-end">
-                  <div className="absolute inset-0 cursor-pointer overflow-hidden" onClick={() => handleMediaTap(post)}>
-                    {post.media_url ? (
-                      isVideo ? (
-                        <video
-                          ref={(el) => {
-                            parallaxMediaRefs.current[post.id] = el
-                          }}
-                          src={post.media_url}
-                          className="parallax-media absolute inset-0 w-full h-full object-cover"
-                          style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                        />
-                      ) : (
-                        <img
-                          ref={(el) => {
-                            parallaxMediaRefs.current[post.id] = el
-                          }}
-                          src={post.media_url}
-                          className="parallax-media absolute inset-0 w-full h-full object-cover"
-                          style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                        />
-                      )
-                    ) : (
-                      <div
-                        ref={(el) => {
-                          parallaxMediaRefs.current[post.id] = el
-                        }}
-                        className="parallax-media absolute inset-0 gradient-flame opacity-70"
-                        style={{ viewTransitionName: `post-media-${post.id}` } as CSSProperties}
-                      />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-                  </div>
+                  <MediaCarousel
+                    media={media}
+                    postId={post.id}
+                    onTap={() => handleMediaTap(post)}
+                    mediaRef={(el) => {
+                      parallaxMediaRefs.current[post.id] = el
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent pointer-events-none" />
 
                   {floatingHeart === post.id && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -584,17 +430,10 @@ export default function Home() {
                     >
                       @{post.author?.username ?? 'unknown'}
                     </button>
-                    {stackCount > 1 && (
-                      <span className="text-[11px] font-semibold bg-black/40 rounded-full px-2 py-1 text-white/80">
-                        {stackCount} bài
-                      </span>
-                    )}
                   </div>
 
-                  {/* Ẩn bài viết: đưa lên góc phải trên cùng kiểu menu "..." của Instagram thay vì chen vào hàng action bên dưới.
-                      Áp dụng cho cả nhóm (author) chứ không chỉ 1 bài, vì giờ card đại diện cho cả stack. */}
                   <button
-                    onClick={() => setHiddenAuthorIds((prev) => new Set(prev).add(authorId))}
+                    onClick={() => setHiddenPostIds((prev) => new Set(prev).add(post.id))}
                     aria-label="Ẩn bài viết"
                     className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center focus-ring"
                   >
@@ -619,7 +458,6 @@ export default function Home() {
                       </div>
                     )}
 
-                    {/* Action panel kiểu Instagram: nhóm tim/bình luận/chia sẻ bên trái, nút lưu tách riêng bên phải */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <button
@@ -674,71 +512,6 @@ export default function Home() {
             )
           })}
       </div>
-
-      {storyViewerAuthorId && (
-        <StoryViewer
-          posts={activeStoryPosts}
-          initialIndex={storyViewerIndex}
-          savedIds={savedIds}
-          onClose={() => setStoryViewerAuthorId(null)}
-          onReact={handleReact}
-          onToggleSaved={toggleSaved}
-          onShare={sharePost}
-        />
-      )}
-
-      {/* New post composer */}
-      {composerOpen && (
-        <div className="absolute inset-0 z-30 bg-black/70 flex items-end">
-          <div className="w-full bg-[var(--surface)] rounded-t-3xl p-5 border-t border-[var(--border)]">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display font-bold text-lg">Bài viết mới</h2>
-              <button onClick={() => setComposerOpen(false)} className="p-1 focus-ring rounded-full" aria-label="Đóng">
-                <X size={18} />
-              </button>
-            </div>
-            <textarea
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              placeholder="Bạn đang nghĩ gì?"
-              rows={3}
-              className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm outline-none focus-ring resize-none mb-3"
-            />
-            <label className="flex items-center justify-center gap-2 border border-dashed border-[var(--border)] rounded-xl py-3 text-sm text-[var(--text-dim)] cursor-pointer mb-4 focus-ring">
-              {mediaFile ? mediaFile.name : 'Chọn ảnh hoặc video (tuỳ chọn)'}
-              <input
-                type="file"
-                accept="image/*,video/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null
-                  if (f && f.type.startsWith('video/') && f.size > 100 * 1024 * 1024) {
-                    showToast('Video tối đa 100MB, chọn file nhỏ hơn nhé', 'error')
-                    e.target.value = ''
-                    return
-                  }
-                  setMediaFile(f)
-                }}
-              />
-            </label>
-            {mediaFile && mediaKind === 'video' && (
-              <video
-                src={URL.createObjectURL(mediaFile)}
-                className="w-full max-h-52 rounded-xl object-cover mb-4 bg-black"
-                controls
-                muted
-              />
-            )}
-            <button
-              onClick={submitPost}
-              disabled={posting || (!caption.trim() && !mediaFile)}
-              className="w-full gradient-nova text-black font-bold rounded-full py-3 focus-ring disabled:opacity-40"
-            >
-              {posting ? 'Đang đăng...' : 'Đăng bài'}
-            </button>
-          </div>
-        </div>
-      )}
 
       <BottomNav />
     </PhoneShell>
