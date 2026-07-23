@@ -73,6 +73,12 @@ export interface MessageReaction {
   created_at: string
 }
 
+export interface SavedPost {
+  post_id: string
+  user_id: string
+  created_at: string
+}
+
 // Row shape returned by the get_my_chats() RPC (backs the Chats list screen)
 export interface ChatSummary {
   channel_id: string

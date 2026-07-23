@@ -5,7 +5,7 @@ import PhoneShell from '../components/PhoneShell'
 import BottomNav from '../components/BottomNav'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import type { Post, ReactionEmotion } from '../types'
+import type { Post, ReactionEmotion, SavedPost } from '../types'
 
 export default function Home() {
   const navigate = useNavigate()
@@ -19,12 +19,32 @@ export default function Home() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
 
-  function toggleSaved(postId: string) {
+  async function toggleSaved(postId: string) {
+    if (!me) return navigate('/login')
+    const alreadySaved = savedIds.has(postId)
+    // optimistic update
     setSavedIds((prev) => {
       const next = new Set(prev)
-      next.has(postId) ? next.delete(postId) : next.add(postId)
+      alreadySaved ? next.delete(postId) : next.add(postId)
       return next
     })
+    if (alreadySaved) {
+      const { error } = await supabase.from('saved_posts').delete().eq('post_id', postId).eq('user_id', me.id)
+      if (error) {
+        console.error(error)
+        setSavedIds((prev) => new Set(prev).add(postId)) // rollback
+      }
+    } else {
+      const { error } = await supabase.from('saved_posts').insert({ post_id: postId, user_id: me.id })
+      if (error) {
+        console.error(error)
+        setSavedIds((prev) => {
+          const next = new Set(prev) // rollback
+          next.delete(postId)
+          return next
+        })
+      }
+    }
   }
 
   async function sharePost(post: Post) {
@@ -79,8 +99,22 @@ export default function Home() {
     setLoading(false)
   }
 
+  async function loadSaved() {
+    if (!me) {
+      setSavedIds(new Set())
+      return
+    }
+    const { data, error } = await supabase.from('saved_posts').select('post_id').eq('user_id', me.id)
+    if (error) {
+      console.error(error)
+      return
+    }
+    setSavedIds(new Set(((data as SavedPost[]) ?? []).map((s) => s.post_id)))
+  }
+
   useEffect(() => {
     loadPosts()
+    loadSaved()
 
     const sub = supabase
       .channel('post_reactions_live')
@@ -96,7 +130,7 @@ export default function Home() {
       supabase.removeChannel(sub)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [me?.id])
 
   async function handleReact(post: Post, emotion: ReactionEmotion | null) {
     if (!me) return
